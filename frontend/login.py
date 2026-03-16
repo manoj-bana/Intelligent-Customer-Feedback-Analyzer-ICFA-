@@ -11,10 +11,10 @@ def show():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
 
-        if st.button("Login", use_container_width=True):
+        if st.button("Login", width="stretch", key="login_button"):
             if not username or not password:
                 st.warning("Please enter both username and password")
                 return
