@@ -26,6 +26,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
+    security_answers: str
 
 
 # ======================
@@ -91,7 +92,8 @@ def register(data: RegisterRequest):
     new_user = User(
         username=data.username,
         email=data.email.lower(),
-        password=data.password
+        password=data.password,
+        security_answers=data.security_answers
     )
 
     db.add(new_user)
@@ -109,6 +111,51 @@ def register(data: RegisterRequest):
     )
 
     return {"access_token": token, "username": new_user.username}
+
+
+# ======================
+# Security Questions
+# ======================
+
+class SecQuestionsRequest(BaseModel):
+    username: str
+
+class SecVerifyRequest(BaseModel):
+    username: str
+    answers: str
+
+@router.post("/get-security-questions")
+def get_sec_questions(data: SecQuestionsRequest):
+    db = SessionLocal()
+    user = db.query(User).filter(User.username == data.username).first()
+    db.close()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    questions = [
+        "What was the name of your first pet?",
+        "What is your mother's maiden name?",
+        "What was the name of your first school?"
+    ]
+    return {"questions": questions}
+
+@router.post("/verify-security")
+def verify_sec(data: SecVerifyRequest):
+    db = SessionLocal()
+    user = db.query(User).filter(User.username == data.username).first()
+    db.close()
+    if not user or not user.security_answers:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if user.security_answers != data.answers:
+        raise HTTPException(status_code=401, detail="Invalid security answers")
+    token = jwt.encode(
+        {
+            "sub": user.username,
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+    return {"access_token": token, "username": user.username}
 
 
 # ======================

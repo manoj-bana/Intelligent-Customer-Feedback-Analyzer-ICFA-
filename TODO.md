@@ -1,14 +1,18 @@
-# Register Page Implementation Plan
+# Forgot Password Feature TODO
 
-## Steps:
-- [x] Step 1: Create frontend/register.py
-- [x] Step 2: Update frontend/app.py
-- [x] Step 3: Update backend/auth.py
-- [x] Step 4: Update tests/test_auth.py
-- [x] Step 5: Test locally (streamlit + uvicorn)
-- [ ] Step 6: Complete
+**Status: In Progress**
 
-**Test Commands (corrected):**
-1. `cd backend`
-2. `uvicorn main:app --reload --port 8000`
-3. New terminal root: `streamlit run frontend/app.py`
+1. [✅] Update User model - Add security_answers field
+2. [✅] Create/run DB migration
+3. [✅] Update backend/auth.py - Endpoints for security questions
+4. [✅] Update frontend/register.py - Add security answer inputs
+5. [✅] Update frontend/login.py - Add Forgot Password UI/flow
+6. [✅] Test register and forgot pw (after deps/backend start)
+7. [ ] Update existing users (admin etc.)
+
+**Run after each backend change:**
+- cd Intelligent-Customer-Feedback-Analyzer-ICFA-/backend
+- uvicorn main:app --reload --port 8000
+
+**Frontend:**
+- streamlit run frontend/app.py

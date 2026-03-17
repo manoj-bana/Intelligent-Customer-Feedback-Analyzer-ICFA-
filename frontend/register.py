@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import re
+import json
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -16,6 +17,11 @@ def show():
         email = st.text_input("Email", key="register_email")
         password = st.text_input("Password", type="password", key="register_password")
         confirm_password = st.text_input("Confirm Password", type="password", key="register_confirm")
+        
+        st.markdown("### Security Questions (for password recovery)")
+        sec_q1 = st.text_input("1. What was the name of your first pet?", key="reg_sec1")
+        sec_q2 = st.text_input("2. What is your mother\\'s maiden name?", key="reg_sec2")
+        sec_q3 = st.text_input("3. What was the name of your first school?", key="reg_sec3")
 
         # Password regex: min 8, upper, lower, digit, special
         password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
@@ -23,7 +29,7 @@ def show():
 
         if st.button("Register", width="stretch", key="register_button"):
             # Client-side validation
-            if not username or not email or not password or not confirm_password:
+            if not username or not email or not password or not confirm_password or not sec_q1 or not sec_q2 or not sec_q3:
                 st.warning("Please fill all fields")
             elif password != confirm_password:
                 st.error("❌ Passwords do not match")
@@ -44,7 +50,7 @@ def show():
                 try:
                     response = requests.post(
                         f"{API_URL}/auth/register",
-                        json={"username": username, "email": email, "password": password},
+                        json={"username": username, "email": email, "password": password, "security_answers": json.dumps({"0": sec_q1.strip(), "1": sec_q2.strip(), "2": sec_q3.strip()})},
                         timeout=5
                     )
                     if response.status_code == 200:
