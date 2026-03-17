@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import pandas as pd
 import io
 from backend.utils.sentiment import analyze_sentiment, extract_keywords
+from backend.database.db import SessionLocal
+from backend.database.models import Feedback
 
 router = APIRouter()
 
