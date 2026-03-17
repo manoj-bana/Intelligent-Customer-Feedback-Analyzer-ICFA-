@@ -39,3 +39,77 @@ def extract_keywords(texts: list, top_n: int = 15) -> list:
         all_words.extend(words)
     counter = Counter(all_words)
     return [{"word": w, "count": c} for w, c in counter.most_common(top_n)]
+
+import pandas as pd
+
+def analyze_sentiment_label_score(text: str) -> tuple[str, float]:
+
+    res = analyze_sentiment(text if isinstance(text, str) else "")
+    return res["label"], res["score"]
+
+def classify_feedback_series(series: pd.Series) -> pd.DataFrame:
+
+    labels = []
+    scores = []
+    for txt in series.fillna(""):
+        label, score = analyze_sentiment_label_score(txt)
+        labels.append(label)
+        scores.append(score)
+    return pd.DataFrame({"SentimentLabel": labels, "SentimentScore": scores})
+
+def add_sentiment_columns(df: pd.DataFrame, text_col: str = "feedback") -> pd.DataFrame:
+
+    if text_col not in df.columns:
+        raise ValueError(
+            f"Column '{text_col}' not found. Available columns: {list(df.columns)}"
+        )
+    sentiment_df = classify_feedback_series(df[text_col])
+    df_out = df.copy()
+    df_out["SentimentLabel"] = sentiment_df["SentimentLabel"]
+    df_out["SentimentScore"] = sentiment_df["SentimentScore"]
+    return df_out
+
+def classify_feedback_file(
+    input_path: str,
+    text_col: str = "feedback",
+    output_path: str | None = None
+) -> str:
+
+    # Load
+    lower = input_path.lower()
+    if lower.endswith(".csv"):
+        df = pd.read_csv(input_path)
+    elif lower.endswith(".xlsx"):
+        df = pd.read_excel(input_path, engine="openpyxl")
+    elif lower.endswith(".xls"):
+        df = pd.read_excel(input_path, engine="xlrd")
+    else:
+        raise ValueError("Unsupported file type. Use .csv, .xlsx, or .xls")
+
+    df_out = add_sentiment_columns(df, text_col=text_col)
+
+    if output_path is None:
+        stem = input_path.rsplit(".", 1)[0]
+        output_path = f"{stem}_with_sentiment.csv"
+
+    if output_path.lower().endswith(".csv"):
+        df_out.to_csv(output_path, index=False)
+    elif output_path.lower().endswith(".xlsx"):
+        df_out.to_excel(output_path, index=False, engine="openpyxl")
+    else:
+        df_out.to_csv(output_path, index=False)
+
+    return output_path
+
+if __name__ == "__main__":
+    sample = pd.DataFrame({
+        "id": [1, 2, 3, 4],
+        "feedback": [
+            "Absolutely love the product! Great experience.",
+            "Terrible service. I'm very disappointed.",
+            "It's okay, nothing special.",
+            "Good features but the app crashes sometimes."
+        ]
+    })
+    sample_with_sentiment = add_sentiment_columns(sample, text_col="feedback")
+    print(sample_with_sentiment)
