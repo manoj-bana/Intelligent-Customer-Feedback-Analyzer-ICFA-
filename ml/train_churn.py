@@ -38,7 +38,6 @@ def train():
     X = df[features].copy()
     y = df["Churn"]
 
-    # ✅ One-Hot Encoding
     X = pd.get_dummies(X, drop_first=True)
 
     # Handle missing numeric values
