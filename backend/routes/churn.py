@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import pandas as pd
 import io
 from backend.utils.churn_model import predict_churn
+from backend.database.db import SessionLocal
+from backend.database.models import ChurnPrediction
 
 router = APIRouter()
 
@@ -17,6 +19,17 @@ async def churn_predict(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Could not read CSV: {e}")
 
     results = predict_churn(df)
+
+    db = SessionLocal()
+
+    new_entry = ChurnPrediction(
+        user_id=1,
+        prediction=str(results)
+    )
+    db.add(new_entry)
+    db.commit()
+    db.close()
+
     return results
 
 @router.get("/test")
