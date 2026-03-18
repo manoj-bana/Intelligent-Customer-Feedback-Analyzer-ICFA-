@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from jose import jwt
 import datetime
 import re
+import hashlib
 
 from backend.database.db import SessionLocal
 from backend.database.models import User
@@ -26,6 +27,19 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
+    security_question: str
+    security_answer: str
+
+class ForgotPasswordRequest(BaseModel):
+    username: str
+
+class VerifySecurityRequest(BaseModel):
+    username: str
+    answer: str
+
+class ResetPasswordRequest(BaseModel):
+    temp_token: str
+    new_password: str
 
 
 # ======================
@@ -87,11 +101,18 @@ def register(data: RegisterRequest):
             detail="Password must have uppercase, lowercase, number, special char (@$!%*?&)"
         )
 
+    if not data.security_question or not data.security_answer:
+        raise HTTPException(status_code=400, detail="Security question and answer required")
+
+    answer_hash = hashlib.sha256(data.security_answer.lower().encode()).hexdigest()
+
     # Save user
     new_user = User(
         username=data.username,
         email=data.email.lower(),
-        password=data.password
+        password=data.password,
+        security_question=data.security_question,
+        security_answer_hash=answer_hash
     )
 
     db.add(new_user)
@@ -109,6 +130,75 @@ def register(data: RegisterRequest):
     )
 
     return {"access_token": token, "username": new_user.username}
+
+
+@router.post("/forgot-password")
+def forgot_password(data: ForgotPasswordRequest):
+    db = SessionLocal()
+    user = db.query(User).filter(User.username == data.username).first()
+    db.close()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.security_question:
+        raise HTTPException(status_code=400, detail="No security question set")
+    return {"security_question": user.security_question}
+
+
+@router.post("/verify-security-answer")
+def verify_security(data: VerifySecurityRequest):
+    db = SessionLocal()
+    user = db.query(User).filter(User.username == data.username).first()
+    db.close()
+    if not user or not user.security_answer_hash:
+        raise HTTPException(status_code=404, detail="User or security answer not found")
+    provided_hash = hashlib.sha256(data.answer.lower().encode()).hexdigest()
+    if provided_hash != user.security_answer_hash:
+        raise HTTPException(status_code=401, detail="Incorrect security answer")
+    
+    # Issue temp token (15 min)
+    temp_token = jwt.encode(
+        {
+            "sub": user.username,
+            "type": "reset",
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+    return {"temp_token": temp_token}
+
+
+@router.post("/reset-password")
+def reset_password(data: ResetPasswordRequest):
+    try:
+        payload = jwt.decode(data.temp_token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload["sub"]
+        if payload.get("type") != "reset":
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except jwt.JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    db = SessionLocal()
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Validate new password
+    password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
+    if len(data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be 8+ chars")
+    if not re.match(password_pattern, data.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must have uppercase, lowercase, number, special char (@$!%*?&)"
+        )
+    
+    # Update password
+    user.password = data.new_password
+    db.commit()
+    db.refresh(user)
+    db.close()
+    return {"success": True, "message": "Password updated successfully"}
 
 
 # ======================
