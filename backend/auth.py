@@ -8,6 +8,9 @@ import hashlib
 from backend.database.db import SessionLocal
 from backend.database.models import User
 
+from backend.database.db import SessionLocal
+from backend.database.models import User
+
 router = APIRouter()
 
 SECRET_KEY = "icfa_secret_key"
@@ -40,6 +43,11 @@ class VerifySecurityRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     temp_token: str
     new_password: str
+
+
+# ======================
+# Login API
+# ======================
 
 
 # ======================
@@ -101,6 +109,7 @@ def register(data: RegisterRequest):
             detail="Password must have uppercase, lowercase, number, special char (@$!%*?&)"
         )
 
+<<<<<<< HEAD
     if not data.security_question or not data.security_answer:
         raise HTTPException(status_code=400, detail="Security question and answer required")
 
@@ -119,6 +128,19 @@ def register(data: RegisterRequest):
     db.commit()
     db.refresh(new_user)
 
+=======
+    # Save user
+    new_user = User(
+        username=data.username,
+        email=data.email.lower(),
+        password=data.password
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+>>>>>>> 14f205fd958a5f5136b66e59389e3083bbfdb9f6
     # Generate token
     token = jwt.encode(
         {
@@ -132,6 +154,7 @@ def register(data: RegisterRequest):
     return {"access_token": token, "username": new_user.username}
 
 
+<<<<<<< HEAD
 @router.post("/forgot-password")
 def forgot_password(data: ForgotPasswordRequest):
     db = SessionLocal()
@@ -201,6 +224,8 @@ def reset_password(data: ResetPasswordRequest):
     return {"success": True, "message": "Password updated successfully"}
 
 
+=======
+>>>>>>> 14f205fd958a5f5136b66e59389e3083bbfdb9f6
 # ======================
 # Test API
 # ======================

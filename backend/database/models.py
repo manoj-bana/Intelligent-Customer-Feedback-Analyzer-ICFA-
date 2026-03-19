@@ -11,8 +11,11 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True)
     password = Column(String)
+<<<<<<< HEAD
     security_question = Column(String, nullable=True)
     security_answer_hash = Column(String, nullable=True)
+=======
+>>>>>>> 14f205fd958a5f5136b66e59389e3083bbfdb9f6
 
 
 class Feedback(Base):
