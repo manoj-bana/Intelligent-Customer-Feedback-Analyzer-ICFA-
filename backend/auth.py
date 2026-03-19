@@ -208,3 +208,4 @@ def reset_password(data: ResetPasswordRequest):
 @router.get("/test")
 def test():
     return {"message": "Auth route working with DB!"}
+#.........
