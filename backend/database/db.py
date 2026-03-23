@@ -10,5 +10,4 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(bind=engine)
 
-
 Base.metadata.create_all(bind=engine)
