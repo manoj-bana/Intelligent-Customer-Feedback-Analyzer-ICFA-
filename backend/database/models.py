@@ -11,16 +11,10 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True)
     password = Column(String)
-<<<<<<< HEAD
-    security_answers = Column(String, nullable=True)
-
-
-=======
     security_question = Column(String, nullable=True)
     security_answer_hash = Column(String, nullable=True)
  
  
->>>>>>> afe831c8d0be1f66ee2d69a6708c99e0ddeb3ac2
 class Feedback(Base):
     __tablename__ = "feedback"
  

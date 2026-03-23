@@ -123,9 +123,5 @@ def show():
             for k in ['forgot_step', 'forgot_username', 'forgot_question', 'forgot_temp_token']:
                 if k in st.session_state:
                     del st.session_state[k]
-<<<<<<< HEAD
-            st.rerun()
-=======
             st.rerun()
  
->>>>>>> afe831c8d0be1f66ee2d69a6708c99e0ddeb3ac2

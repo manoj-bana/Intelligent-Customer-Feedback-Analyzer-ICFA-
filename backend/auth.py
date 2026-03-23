@@ -27,11 +27,6 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
-<<<<<<< HEAD
-    security_answers: str
-
-
-=======
     security_question: str
     security_answer: str
  
@@ -47,7 +42,6 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
  
  
->>>>>>> afe831c8d0be1f66ee2d69a6708c99e0ddeb3ac2
 # ======================
 # Login API
 # ======================
@@ -117,12 +111,8 @@ def register(data: RegisterRequest):
         username=data.username,
         email=data.email.lower(),
         password=data.password,
-<<<<<<< HEAD
-        security_answers=data.security_answers
-=======
         security_question=data.security_question,
         security_answer_hash=answer_hash
->>>>>>> afe831c8d0be1f66ee2d69a6708c99e0ddeb3ac2
     )
  
     db.add(new_user)
