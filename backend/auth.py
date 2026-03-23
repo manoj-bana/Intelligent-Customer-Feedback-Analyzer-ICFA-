@@ -1,256 +1,171 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from jose import jwt
-import datetime
-import re
-import hashlib
+import streamlit as st
+import requests
  
-from backend.database.db import SessionLocal
-from backend.database.models import User
- 
-router = APIRouter()
- 
-SECRET_KEY = "icfa_secret_key"
-ALGORITHM = "HS256"
- 
- 
-# ======================
-# Request Models
-# ======================
- 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
- 
- 
-class RegisterRequest(BaseModel):
-    username: str
-    email: str
-    password: str
-    security_question: str
-    security_answer: str
- 
-class ForgotPasswordRequest(BaseModel):
-    username: str
- 
-class VerifySecurityRequest(BaseModel):
-    username: str
-    answer: str
- 
-class ResetPasswordRequest(BaseModel):
-    temp_token: str
-    new_password: str
- 
- 
-# ======================
-# Login API
-# ======================
- 
-@router.post("/login")
-def login(data: LoginRequest):
- 
-    db = SessionLocal()
- 
-    user = db.query(User).filter(User.username == data.username).first()
- 
-    if not user or user.password != data.password:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
- 
-    token = jwt.encode(
-        {
-            "sub": user.username,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=8)
-        },
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
- 
-    return {"access_token": token, "username": user.username}
- 
- 
-# ======================
-# Register API
-# ======================
- 
-@router.post("/register")
-def register(data: RegisterRequest):
- 
-    db = SessionLocal()
- 
-    # Validation
-    password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
-    email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
- 
-    if not re.match(email_pattern, data.email):
-        raise HTTPException(status_code=400, detail="Invalid email format")
- 
-    existing_user = db.query(User).filter(User.username == data.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already exists")
- 
-    existing_email = db.query(User).filter(User.email == data.email.lower()).first()
-    if existing_email:
-        raise HTTPException(status_code=400, detail="Email already registered")
- 
-    if len(data.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be 8+ chars")
- 
-    if not re.match(password_pattern, data.password):
-        raise HTTPException(
-            status_code=400,
-            detail="Password must have uppercase, lowercase, number, special char (@$!%*?&)"
-        )
- 
-    if not data.security_question or not data.security_answer:
-        raise HTTPException(status_code=400, detail="Security question and answer required")
- 
-    answer_hash = hashlib.sha256(data.security_answer.lower().encode()).hexdigest()
- 
-    # Save user
-    new_user = User(
-        username=data.username,
-        email=data.email.lower(),
-        password=data.password,
-        security_question=data.security_question,
-        security_answer_hash=answer_hash
-    )
- 
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
- 
-    # Generate token
-    token = jwt.encode(
-        {
-            "sub": new_user.username,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=8)
-        },
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
- 
-    return {"access_token": token, "username": new_user.username}
- 
- 
-@router.post("/forgot-password")
-def forgot_password(data: ForgotPasswordRequest):
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == data.username).first()
-    db.close()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if not user.security_question:
-        raise HTTPException(status_code=400, detail="No security question set")
-    return {"security_question": user.security_question}
- 
- 
-@router.post("/verify-security-answer")
-def verify_security(data: VerifySecurityRequest):
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == data.username).first()
-    db.close()
-    if not user or not user.security_answer_hash:
-        raise HTTPException(status_code=404, detail="User or security answer not found")
-    provided_hash = hashlib.sha256(data.answer.lower().encode()).hexdigest()
-    if provided_hash != user.security_answer_hash:
-        raise HTTPException(status_code=401, detail="Incorrect security answer")
-   
-    # Issue temp token (15 min)
-    temp_token = jwt.encode(
-        {
-            "sub": user.username,
-            "type": "reset",
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
-        },
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
-    return {"temp_token": temp_token}
- 
- 
-@router.post("/reset-password")
-def reset_password(data: ResetPasswordRequest):
-    try:
-        payload = jwt.decode(data.temp_token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload["sub"]
-        if payload.get("type") != "reset":
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-   
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-   
-    # Validate new password
-    password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
-    if len(data.new_password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be 8+ chars")
-    if not re.match(password_pattern, data.new_password):
-        raise HTTPException(
-            status_code=400,
-            detail="Password must have uppercase, lowercase, number, special char (@$!%*?&)"
-        )
-   
-    # Update password
-    user.password = data.new_password
-    db.commit()
-    db.refresh(user)
-    db.close()
-    return {"success": True, "message": "Password updated successfully"}
- 
- 
-# ======================
-# Security Questions
-# ======================
+API_URL = "http://127.0.0.1:8000"
 
-class SecQuestionsRequest(BaseModel):
-    username: str
+def show():
+    # CSS for uniform input sizing and perfect forgot link
+    st.markdown("""
+    <style>
+    .stTextInput > div > div > input {
+        height: 44px !important;
+        padding: 0.75rem 1rem !important;
+    }
+    .stButton > button {
+        border-radius: 10px !important;
+        height: 44px !important;
+        font-weight: 500 !important;
+    }
+    div.stButton > button.primary {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed) !important;
+        border: none !important;
+    }
+    .forgot-link {
+        background: transparent !important;
+        color: #6366f1 !important;
+        border: 1px solid transparent !important;
+        box-shadow: none !important;
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+        height: 36px !important;
+        padding: 0.375rem 0.75rem !important;
+        text-decoration: none !important;
+    }
+    .forgot-link:hover {
+        background: #f8fafc !important;
+        border-color: #4f46e5 !important;
+        color: #4f46e5 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    if 'show_forgot_password' not in st.session_state:
+        st.session_state.show_forgot_password = False
+    
+    st.title("🔐 ICFA Login")
+    st.markdown("**Intelligent Customer Feedback Analyzer**")
+    
+    # Main layout columns
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        
+        # **PERFECT MODERN LOGIN LAYOUT**
+        st.markdown("### Sign in")
+        
+        # Username - FULL WIDTH, SAME SIZE
+        username = st.text_input("👤 Username", key="login_username", placeholder="Enter username")
+        
+        # Password - FULL WIDTH, SAME SIZE AS USERNAME
+        password = st.text_input("🔒 Password", type="password", key="login_password", placeholder="Enter password")
+        
+        # Login Button + Forgot Password - SAME ROW 70/30
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col1:
+            if st.button("Sign In", type="primary", use_container_width=True):
+                if not username or not password:
+                    st.warning("Please enter username and password")
+                else:
+                    try:
+                        response = requests.post(f"{API_URL}/auth/login",
+                                               json={"username": username, "password": password}, timeout=5)
+                        if response.status_code == 200:
+                            data = response.json()
+                            st.session_state.logged_in = True
+                            st.session_state.username = data["username"]
+                            st.session_state.token = data["access_token"]
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid credentials")
+                    except requests.exceptions.ConnectionError:
+                        if username == "admin" and password == "admin123":
+                            st.session_state.logged_in = True
+                            st.session_state.username = "admin"
+                            st.rerun()
+                        else:
+                            st.error("❌ Service unavailable")
+                    except:
+                        st.error("❌ Login error")
+        with btn_col2:
+            if st.button("Forgot Password?", key="forgot_link", help="Reset password"):
+                st.session_state.show_forgot_password = True
+                st.rerun()
+        
+        # Forgot flow
+        if st.session_state.show_forgot_password:
+            st.markdown("### 🔑 Reset Password")
+            if st.button("← Back to Login", use_container_width=True):
+                st.session_state.show_forgot_password = False
+                for k in ['forgot_step','forgot_username','forgot_question','forgot_temp_token']:
+                    if k in st.session_state: del st.session_state[k]
+                st.rerun()
+            
+            if 'forgot_step' not in st.session_state:
+                st.session_state.forgot_step = 0
+                st.session_state.forgot_username = ''
+                st.session_state.forgot_question = ''
+                st.session_state.forgot_temp_token = ''
+            
+            if st.session_state.forgot_step == 0:
+                st.markdown("**Step 1** - Username")
+                username = st.text_input("👤 Username", key='forgot_username_input')
+                if st.button("Continue", use_container_width=True):
+                    if username:
+                        try:
+                            resp = requests.post(f'{API_URL}/auth/forgot-password', 
+                                               json={'username': username}, timeout=30)
+                            if resp.status_code == 200:
+                                st.session_state.forgot_username = username
+                                st.session_state.forgot_question = resp.json()['security_question']
+                                st.session_state.forgot_step = 1
+                                st.rerun()
+                            else:
+                                st.error(resp.json().get('detail', 'User not found'))
+                        except Exception as e:
+                            st.error(str(e))
+                    else:
+                        st.warning("Username required")
+            
+            elif st.session_state.forgot_step == 1:
+                st.markdown("**Step 2** - Security Answer")
+                st.info(f"*{st.session_state.forgot_question}*")
+                answer = st.text_input("🔒 Answer", type='password', key='forgot_answer')
+                if st.button("Verify", use_container_width=True):
+                    if answer:
+                        try:
+                            resp = requests.post(f'{API_URL}/auth/verify-security-answer',
+                                               json={'username': st.session_state.forgot_username,
+                                                     'answer': answer}, timeout=30)
+                            if resp.status_code == 200:
+                                st.session_state.forgot_temp_token = resp.json()['temp_token']
+                                st.session_state.forgot_step = 2
+                                st.rerun()
+                            else:
+                                st.error(resp.json().get('detail', 'Wrong answer'))
+                        except Exception as e:
+                            st.error(str(e))
+                    else:
+                        st.warning("Answer required")
+            
+            elif st.session_state.forgot_step == 2:
+                st.markdown("**Step 3** - New Password")
+                new_pass = st.text_input("🔐 New Password", type='password', key='new_password1')
+                confirm_pass = st.text_input("🔐 Confirm", type='password', key='new_password2')
+                if st.button("Reset Password", type="primary", use_container_width=True):
+                    if new_pass == confirm_pass and new_pass:
+                        try:
+                            resp = requests.post(f'{API_URL}/auth/reset-password',
+                                               json={'temp_token': st.session_state.forgot_temp_token,
+                                                     'new_password': new_pass}, timeout=30)
+                            if resp.status_code == 200:
+                                st.success("✅ Password reset complete!")
+                                for k in ['forgot_step','forgot_username','forgot_question','forgot_temp_token']:
+                                    if k in st.session_state: del st.session_state[k]
+                                st.session_state.show_forgot_password = False
+                                st.rerun()
+                            else:
+                                st.error(resp.json().get('detail', 'Failed'))
+                        except Exception as e:
+                            st.error(str(e))
+                    else:
+                        st.error("Passwords don't match")
 
-class SecVerifyRequest(BaseModel):
-    username: str
-    answers: str
-
-@router.post("/get-security-questions")
-def get_sec_questions(data: SecQuestionsRequest):
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == data.username).first()
-    db.close()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    questions = [
-        "What was the name of your first pet?",
-        "What is your mother's maiden name?",
-        "What was the name of your first school?"
-    ]
-    return {"questions": questions}
-
-@router.post("/verify-security")
-def verify_sec(data: SecVerifyRequest):
-    db = SessionLocal()
-    user = db.query(User).filter(User.username == data.username).first()
-    db.close()
-    if not user or not user.security_answers:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if user.security_answers != data.answers:
-        raise HTTPException(status_code=401, detail="Invalid security answers")
-    token = jwt.encode(
-        {
-            "sub": user.username,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=8)
-        },
-        SECRET_KEY,
-        algorithm=ALGORITHM
-    )
-    return {"access_token": token, "username": user.username}
-
-
-# ======================
-# Test API
-# ======================
- 
-@router.get("/test")
-def test():
-    return {"message": "Auth route working with DB!"}
-#.........

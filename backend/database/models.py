@@ -13,8 +13,8 @@ class User(Base):
     password = Column(String)
     security_question = Column(String, nullable=True)
     security_answer_hash = Column(String, nullable=True)
- 
- 
+
+
 class Feedback(Base):
     __tablename__ = "feedback"
  
