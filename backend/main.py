@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.auth import router as auth_router
 from backend.routes.feedback import router as feedback_router
 from backend.routes.churn import router as churn_router
+from backend.database.db import engine
+from backend.database.models import Base
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="ICFA API")
 
