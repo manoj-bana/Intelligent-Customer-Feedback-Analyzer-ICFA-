@@ -1,12 +1,3 @@
-"""
-Day 3 - Person 3
-Test the complete end-to-end API flow for sentiment analysis.
-Make sure the backend is running first:
-  uvicorn backend.main:app --reload
-
-Run: python ml/test_full_sentiment_api.py
-"""
-
 import requests
 
 API_URL = "http://127.0.0.1:8000"

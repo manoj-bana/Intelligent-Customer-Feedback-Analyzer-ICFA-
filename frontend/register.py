@@ -74,4 +74,9 @@ def show():
                 except Exception as e:
                     st.error(f"Unexpected error: {e}")
  
+<<<<<<< HEAD
         st.caption("Example: Valid password 'Passw0rd!'")
+=======
+        st.caption("Example: Valid password 'Passw0rd!'")
+ 
+>>>>>>> afe831c8d0be1f66ee2d69a6708c99e0ddeb3ac2

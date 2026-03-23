@@ -1,11 +1,3 @@
-"""
-Day 1 - Person 3
-Standalone test to prove the HuggingFace model works.
-WARNING: First run downloads ~250MB. Be patient!
-
-Run: python ml/test_sentiment.py
-"""
-
 from transformers import pipeline
 
 print("Loading model... (downloads ~250MB on first run)")

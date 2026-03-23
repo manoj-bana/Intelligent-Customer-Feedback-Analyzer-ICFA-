@@ -1,10 +1,3 @@
-"""
-Day 2 - Person 3
-Test the sentiment utility module that the backend will use.
-
-Run from project root: python ml/test_sentiment_module.py
-"""
-
 import sys
 sys.path.append(".")  # so Python can find backend/
 
