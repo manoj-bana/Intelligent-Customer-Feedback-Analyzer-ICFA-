@@ -7,22 +7,22 @@ import hashlib
 
 from backend.database.db import SessionLocal
 from backend.database.models import User
-
+ 
 router = APIRouter()
-
+ 
 SECRET_KEY = "icfa_secret_key"
 ALGORITHM = "HS256"
-
-
+ 
+ 
 # ======================
 # Request Models
 # ======================
-
+ 
 class LoginRequest(BaseModel):
     username: str
     password: str
-
-
+ 
+ 
 class RegisterRequest(BaseModel):
     username: str
     email: str
@@ -45,17 +45,17 @@ class ResetPasswordRequest(BaseModel):
 # ======================
 # Login API
 # ======================
-
+ 
 @router.post("/login")
 def login(data: LoginRequest):
-
+ 
     db = SessionLocal()
-
+ 
     user = db.query(User).filter(User.username == data.username).first()
-
+ 
     if not user or user.password != data.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-
+ 
     token = jwt.encode(
         {
             "sub": user.username,
@@ -64,37 +64,37 @@ def login(data: LoginRequest):
         SECRET_KEY,
         algorithm=ALGORITHM
     )
-
+ 
     return {"access_token": token, "username": user.username}
-
-
+ 
+ 
 # ======================
 # Register API
 # ======================
-
+ 
 @router.post("/register")
 def register(data: RegisterRequest):
-
+ 
     db = SessionLocal()
-
+ 
     # Validation
     password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
     email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-
+ 
     if not re.match(email_pattern, data.email):
         raise HTTPException(status_code=400, detail="Invalid email format")
-
+ 
     existing_user = db.query(User).filter(User.username == data.username).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already exists")
-
+ 
     existing_email = db.query(User).filter(User.email == data.email.lower()).first()
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
-
+ 
     if len(data.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be 8+ chars")
-
+ 
     if not re.match(password_pattern, data.password):
         raise HTTPException(
             status_code=400,
@@ -114,11 +114,11 @@ def register(data: RegisterRequest):
         security_question=data.security_question,
         security_answer_hash=answer_hash
     )
-
+ 
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-
+ 
     # Generate token
     token = jwt.encode(
         {
@@ -128,7 +128,7 @@ def register(data: RegisterRequest):
         SECRET_KEY,
         algorithm=ALGORITHM
     )
-
+ 
     return {"access_token": token, "username": new_user.username}
 
 
@@ -204,7 +204,8 @@ def reset_password(data: ResetPasswordRequest):
 # ======================
 # Test API
 # ======================
-
+ 
 @router.get("/test")
 def test():
     return {"message": "Auth route working with DB!"}
+#.........

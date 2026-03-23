@@ -1,15 +1,15 @@
 import streamlit as st
 import requests
 import re
-
+ 
 API_URL = "http://127.0.0.1:8000"
-
-
+ 
+ 
 def show():
     st.title("🔐 ICFA - Register")
     st.markdown("### Intelligent Customer Feedback Analyzer")
     st.divider()
-
+ 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         username = st.text_input("Username", key="register_username")
@@ -30,7 +30,7 @@ def show():
         # Password regex: min 8, upper, lower, digit, special
         password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
         email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-
+ 
         if st.button("Register", width="stretch", key="register_button"):
             # Client-side validation
             if not username or not email or not password or not confirm_password:
@@ -73,6 +73,6 @@ def show():
                     st.error("❌ Backend not available. Start `cd backend && uvicorn main:app --reload --port 8000`")
                 except Exception as e:
                     st.error(f"Unexpected error: {e}")
-
+ 
         st.caption("Example: Valid password 'Passw0rd!'")
-
+ 
