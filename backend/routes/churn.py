@@ -20,15 +20,8 @@ async def churn_predict(file: UploadFile = File(...)):
 
     results = predict_churn(df)
 
-    db = SessionLocal()
-
-    new_entry = ChurnPrediction(
-        user_id=1,
-        prediction=str(results)
-    )
-    db.add(new_entry)
-    db.commit()
-    db.close()
+    # DB logging disabled to prevent user_id errors
+    # TODO: Add auth context for proper user_id
 
     return results
 
