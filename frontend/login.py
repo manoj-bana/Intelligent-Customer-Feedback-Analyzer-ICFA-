@@ -1,8 +1,8 @@
 import streamlit as st
 import requests
-
+ 
 API_URL = "http://127.0.0.1:8000"
-
+ 
 def show():
     # CSS for uniform inputs + forgot link
     st.markdown("""
@@ -36,12 +36,12 @@ def show():
     .status-offline { background: #fee2e2; color: #991b1b; }
     </style>
     """, unsafe_allow_html=True)
-    
+   
     if 'show_forgot_password' not in st.session_state:
         st.session_state.show_forgot_password = False
-    
+   
     st.title("🔐 ICFA Login")
-    
+   
     # Backend status check
     try:
         status_resp = requests.get(f"{API_URL}/auth/test", timeout=2)
@@ -50,19 +50,19 @@ def show():
     except:
         status = '🔴 Offline'
         status_class = 'status-offline'
-    
+   
     col1, col2, col3 = st.columns([1, 4, 1])
     with col2:
         st.markdown(f'<span class="status-badge {status_class}">{status}</span>', unsafe_allow_html=True)
-    
+   
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("### Sign in")
-        
+       
         # Username & Password - SAME SIZE
         username = st.text_input("👤 Username", key="login_username", placeholder="Enter username")
         password = st.text_input("🔒 Password", type="password", key="login_password", placeholder="Enter password")
-        
+       
         # Login (70%) + Forgot (30%)
         btn_col1, btn_col2 = st.columns([3, 1])
         with btn_col1:
@@ -78,7 +78,7 @@ def show():
                 else:
                     try:
                         response = requests.post(f"{API_URL}/auth/login",
-                                               json={"username": username, "password": password}, 
+                                               json={"username": username, "password": password},
                                                timeout=5)
                         if response.status_code == 200:
                             data = response.json()
@@ -93,16 +93,16 @@ def show():
                         st.error("❌ Backend offline - use demo: admin/admin123")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
-        
+       
         with btn_col2:
             if st.button("Forgot Password?", key="forgot_link", help="Reset password"):
                 st.session_state.show_forgot_password = True
                 st.rerun()
-        
+       
         # Forgot flow
         if st.session_state.show_forgot_password:
             st.markdown("### 🔑 Reset Password")
-            
+           
             col_back1, col_back2 = st.columns([3, 1])
             with col_back2:
                 if st.button("← Back", use_container_width=False):
@@ -110,17 +110,17 @@ def show():
                     for k in ['forgot_step','forgot_username','forgot_question','forgot_temp_token']:
                         if k in st.session_state: del st.session_state[k]
                     st.rerun()
-            
+           
             if 'forgot_step' not in st.session_state:
                 st.session_state.forgot_step = 0
                 st.session_state.forgot_username = ''
                 st.session_state.forgot_question = ''
                 st.session_state.forgot_temp_token = ''
-            
+           
             if st.session_state.forgot_step == 0:
                 st.markdown("*Step 1: Enter username*")
                 username = st.text_input("👤 Username", key="forgot_username_input")
-                if st.button("Get Security Question", use_container_width=True):
+                def get_question():
                     if username:
                         try:
                             resp = requests.post(f'{API_URL}/auth/forgot-password',
@@ -129,19 +129,24 @@ def show():
                                 st.session_state.forgot_username = username
                                 st.session_state.forgot_question = resp.json()['security_question']
                                 st.session_state.forgot_step = 1
-                                st.rerun()
                             else:
                                 st.error(resp.json().get("detail", "User not found"))
-                        except:
-                            st.error("Service error")
+                                return False
+                            return True
+                        except Exception as e:
+                            st.error(f"Service error: {e}")
+                            return False
                     else:
                         st.warning("Username required")
-            
+                        return False
+               
+                get_question_clicked = st.button("Get Security Question", use_container_width=True, on_click=get_question)
+           
             elif st.session_state.forgot_step == 1:
                 st.markdown("*Step 2: Answer security question*")
                 st.info(f"**Q:** {st.session_state.forgot_question}")
                 answer = st.text_input("🔒 Answer", type="password", key="forgot_answer")
-                if st.button("Verify Answer", use_container_width=True):
+                def verify_answer():
                     if answer:
                         try:
                             resp = requests.post(f'{API_URL}/auth/verify-security-answer',
@@ -150,14 +155,19 @@ def show():
                             if resp.status_code == 200:
                                 st.session_state.forgot_temp_token = resp.json()['temp_token']
                                 st.session_state.forgot_step = 2
-                                st.rerun()
+                                return True
                             else:
                                 st.error(resp.json().get("detail", "Wrong answer"))
-                        except:
-                            st.error("Service error")
+                                return False
+                        except Exception as e:
+                            st.error(f"Service error: {e}")
+                            return False
                     else:
                         st.warning("Answer required")
-            
+                        return False
+               
+                verify_clicked = st.button("Verify Answer", use_container_width=True, on_click=verify_answer)
+           
             elif st.session_state.forgot_step == 2:
                 st.markdown("*Step 3: Set new password*")
                 new_pass = st.text_input("🔐 New Password", type="password", key="new_password1")
@@ -180,4 +190,6 @@ def show():
                             st.error("Service error")
                     else:
                         st.error("Passwords don't match")
-
+ 
+ 
+ 
