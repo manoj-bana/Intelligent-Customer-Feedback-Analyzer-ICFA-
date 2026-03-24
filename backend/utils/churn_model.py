@@ -19,9 +19,9 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     df = df[available]
     if "TotalCharges" in df.columns:
         df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
-    for col in df.select_dtypes(include="object").columns:
-        le = LabelEncoder()
-        df[col] = le.fit_transform(df[col].astype(str))
+    
+    # FIXED: Use pd.get_dummies to match training exactly
+    df = pd.get_dummies(df, columns=['Contract', 'PaymentMethod', 'InternetService'], drop_first=True)
     df = df.fillna(df.median(numeric_only=True))
     return df
 
