@@ -120,7 +120,7 @@ def show():
             if st.session_state.forgot_step == 0:
                 st.markdown("*Step 1: Enter username*")
                 username = st.text_input("👤 Username", key="forgot_username_input")
-                if st.button("Get Security Question", use_container_width=True):
+                def get_question():
                     if username:
                         try:
                             resp = requests.post(f'{API_URL}/auth/forgot-password',
@@ -129,19 +129,24 @@ def show():
                                 st.session_state.forgot_username = username
                                 st.session_state.forgot_question = resp.json()['security_question']
                                 st.session_state.forgot_step = 1
-                                st.rerun()
                             else:
                                 st.error(resp.json().get("detail", "User not found"))
-                        except:
-                            st.error("Service error")
+                                return False
+                            return True
+                        except Exception as e:
+                            st.error(f"Service error: {e}")
+                            return False
                     else:
                         st.warning("Username required")
+                        return False
+                
+                get_question_clicked = st.button("Get Security Question", use_container_width=True, on_click=get_question)
             
             elif st.session_state.forgot_step == 1:
                 st.markdown("*Step 2: Answer security question*")
                 st.info(f"**Q:** {st.session_state.forgot_question}")
                 answer = st.text_input("🔒 Answer", type="password", key="forgot_answer")
-                if st.button("Verify Answer", use_container_width=True):
+                def verify_answer():
                     if answer:
                         try:
                             resp = requests.post(f'{API_URL}/auth/verify-security-answer',
@@ -150,13 +155,18 @@ def show():
                             if resp.status_code == 200:
                                 st.session_state.forgot_temp_token = resp.json()['temp_token']
                                 st.session_state.forgot_step = 2
-                                st.rerun()
+                                return True
                             else:
                                 st.error(resp.json().get("detail", "Wrong answer"))
-                        except:
-                            st.error("Service error")
+                                return False
+                        except Exception as e:
+                            st.error(f"Service error: {e}")
+                            return False
                     else:
                         st.warning("Answer required")
+                        return False
+                
+                verify_clicked = st.button("Verify Answer", use_container_width=True, on_click=verify_answer)
             
             elif st.session_state.forgot_step == 2:
                 st.markdown("*Step 3: Set new password*")
