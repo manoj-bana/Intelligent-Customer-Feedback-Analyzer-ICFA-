@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 venv/
-.env
-*.db
-icfa.db
+"__pycache__/" 
+"*.pyc" 
+"*.py[cod]"   
+"icfa.db" 
+"**/__pycache__/" 

@@ -20,16 +20,18 @@ async def churn_predict(file: UploadFile = File(...)):
 
     results = predict_churn(df)
 
-    db = SessionLocal()
-
-    new_entry = ChurnPrediction(
-        user_id=1,
-        prediction=str(results)
-    )
-    db.add(new_entry)
-    db.commit()
-    db.close()
-
+    try:
+        db = SessionLocal()
+        new_entry = ChurnPrediction(
+            user_id=1,
+            prediction=str(results)
+        )
+        db.add(new_entry)
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"DB save failed (non-critical): {e}")
+    
     return results
 
 @router.get("/test")
