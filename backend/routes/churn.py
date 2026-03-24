@@ -20,9 +20,18 @@ async def churn_predict(file: UploadFile = File(...)):
 
     results = predict_churn(df)
 
-    # DB logging disabled to prevent user_id errors
-    # TODO: Add auth context for proper user_id
-
+    try:
+        db = SessionLocal()
+        new_entry = ChurnPrediction(
+            user_id=1,
+            prediction=str(results)
+        )
+        db.add(new_entry)
+        db.commit()
+        db.close()
+    except Exception as e:
+        print(f"DB save failed (non-critical): {e}")
+    
     return results
 
 @router.get("/test")
