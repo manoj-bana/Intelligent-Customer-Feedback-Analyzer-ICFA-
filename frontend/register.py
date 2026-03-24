@@ -16,17 +16,17 @@ def show():
         email = st.text_input("Email", key="register_email")
         password = st.text_input("Password", type="password", key="register_password")
         confirm_password = st.text_input("Confirm Password", type="password", key="register_confirm")
- 
+
         security_questions = [
             "What was your first pet's name?",
-            "What is your mother's maiden name?",
+            "What is your mother's maiden name?", 
             "What city were you born in?",
             "What was your first school?",
             "What is the name of your favorite teacher?"
         ]
         question = st.selectbox("Security Question", security_questions, key="register_question")
         answer = st.text_input("Security Answer (case insensitive)", help="Answer will be securely hashed", key="register_answer")
- 
+
         # Password regex: min 8, upper, lower, digit, special
         password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
         email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
