@@ -7,18 +7,18 @@ import secrets
 
 from backend.database.db import SessionLocal
 from backend.database.models import User
-
+ 
 router = APIRouter()
 SECRET_KEY = "icfa_secret_key"
 ALGORITHM = "HS256"
-
+ 
 # Simple in-memory user DB with plain text passwords (good enough for college project). Emails tracked separately for uniqueness.
 USERS_DB = {
     "admin": "admin123",
     "user1": "pass123",
 }
 EMAILS_DB = {"admin@example.com", "user1@example.com"}
-
+ 
 class LoginRequest(BaseModel):
     username: str
     password: str
