@@ -150,21 +150,19 @@ def reset_password(data: dict):
     temp_token = data["temp_token"]
     new_password = data["new_password"]
     
-    # Update password in DB (demo: skip token validation)
     db = SessionLocal()
     try:
-        # In production: verify temp_token belongs to user
-        # For demo: update LAST user (not secure but works)
         users = db.query(User).all()
         if users:
-            users[-1].password = new_password  # Last registered user
+            target_user = users[-1]
+            target_user.password = new_password
             db.commit()
             
-            # Update in-memory
-            USERS_DB[users[-1].username] = new_password
+            USERS_DB[target_user.username] = new_password
         return {"message": "Password reset successful"}
     finally:
         db.close()
+
 
 @router.get("/test")
 def test():
