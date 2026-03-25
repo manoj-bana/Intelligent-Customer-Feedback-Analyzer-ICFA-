@@ -34,43 +34,6 @@ def show():
     }
     .status-online  { background: #dcfce7; color: #166534; }
     .status-offline { background: #fee2e2; color: #991b1b; }
-
-    /* Hide eye icon — target button and its parent wrapper */
-    button[data-testid="stTextInputPasswordToggle"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        overflow: hidden !important;
-    }
-    [data-testid="stTextInputPasswordToggle"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-    }
-    /* Hide the icon inside the button too */
-    button[data-testid="stTextInputPasswordToggle"] svg,
-    button[data-testid="stTextInputPasswordToggle"] * {
-        display: none !important;
-        visibility: hidden !important;
-    }
-    /* Hide wrapper span that holds the toggle */
-    .stTextInput [data-testid="stTextInputPasswordToggle"],
-    .stTextInput span:has(> button[data-testid="stTextInputPasswordToggle"]) {
-        display: none !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        overflow: hidden !important;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -79,6 +42,7 @@ def show():
 
     st.title("🔐 ICFA Login")
 
+    # Backend status pill
     try:
         requests.get(f"{API_URL}/auth/test", timeout=2)
         status, cls = "🟢 Online", "status-online"
@@ -92,9 +56,10 @@ def show():
     _, col, _ = st.columns([1, 2, 1])
     with col:
 
-        # ── Normal Login ──
+        # ── Normal Login ────────────────────────────────────────────────
         if not st.session_state.show_forgot_password:
             st.markdown("### Sign in")
+
             username = st.text_input("👤 Username", key="login_username", placeholder="Enter username")
             password = st.text_input("🔒 Password", type="password", key="login_password", placeholder="Enter password")
 
@@ -129,9 +94,10 @@ def show():
                     st.session_state.show_forgot_password = True
                     st.rerun()
 
-        # ── Forgot Password Flow ──
+        # ── Forgot Password Flow ─────────────────────────────────────────
         else:
             st.markdown("### 🔑 Reset Password")
+
             _, back_col = st.columns([3, 1])
             with back_col:
                 if st.button("← Back"):
@@ -200,6 +166,7 @@ def show():
                 new_pass = st.text_input("🔐 New Password", type="password", key="new_password1")
                 confirm  = st.text_input("🔐 Confirm Password", type="password", key="new_password2")
 
+                # Inline checklist
                 if new_pass:
                     checks = {
                         "length":  len(new_pass) >= 8,
@@ -209,10 +176,10 @@ def show():
                         "special": bool(re.search(r'[@$!%*?&]', new_pass)),
                     }
                     labels = {
-                        "length":  "At least 8 characters",
-                        "upper":   "Uppercase letter",
-                        "lower":   "Lowercase letter",
-                        "digit":   "Number",
+                        "length": "At least 8 characters",
+                        "upper":  "Uppercase letter",
+                        "lower":  "Lowercase letter",
+                        "digit":  "Number",
                         "special": "Special character (@$!%*?&)",
                     }
                     lines = []

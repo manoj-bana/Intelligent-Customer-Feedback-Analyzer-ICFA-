@@ -5,6 +5,8 @@ import time
 
 API_URL = "http://127.0.0.1:8000"
 
+# ── Validation helpers ──────────────────────────────────────────────────────
+
 EMAIL_RE = re.compile(r'^[\w\.-]+@[\w\.-]+\.\w+$')
 PASSWORD_RE = re.compile(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$')
 
@@ -17,7 +19,8 @@ SECURITY_QUESTIONS = [
 ]
 
 
-def _check_username_available(username: str):
+def _check_username_available(username: str) -> bool | None:
+    """Return True if available, False if taken, None on network error."""
     try:
         r = requests.get(f"{API_URL}/auth/check-username", params={"username": username}, timeout=3)
         return not r.json().get("exists", False)
@@ -25,7 +28,8 @@ def _check_username_available(username: str):
         return None
 
 
-def _check_email_available(email: str):
+def _check_email_available(email: str) -> bool | None:
+    """Return True if available, False if taken, None on network error."""
     try:
         r = requests.get(f"{API_URL}/auth/check-email", params={"email": email}, timeout=3)
         return not r.json().get("exists", False)
@@ -49,10 +53,10 @@ def _inline_ok(msg: str):
 
 def _password_strength(pwd: str) -> dict:
     return {
-        "length":  len(pwd) >= 8,
-        "upper":   bool(re.search(r'[A-Z]', pwd)),
-        "lower":   bool(re.search(r'[a-z]', pwd)),
-        "digit":   bool(re.search(r'\d', pwd)),
+        "length": len(pwd) >= 8,
+        "upper": bool(re.search(r'[A-Z]', pwd)),
+        "lower": bool(re.search(r'[a-z]', pwd)),
+        "digit": bool(re.search(r'\d', pwd)),
         "special": bool(re.search(r'[@$!%*?&]', pwd)),
     }
 
@@ -70,7 +74,7 @@ def _render_password_checklist(pwd: str):
     }
     lines = []
     for key, label in labels.items():
-        icon  = "✅" if checks[key] else "❌"
+        icon = "✅" if checks[key] else "❌"
         color = "#22c55e" if checks[key] else "#ef4444"
         lines.append(f'<span style="color:{color};font-size:0.78rem;">{icon} {label}</span>')
     st.markdown(
@@ -80,6 +84,8 @@ def _render_password_checklist(pwd: str):
         unsafe_allow_html=True,
     )
 
+
+# ── Main show() ────────────────────────────────────────────────────────────
 
 def show():
     st.markdown("""
@@ -93,43 +99,6 @@ def show():
         height: 44px !important;
         font-weight: 500 !important;
     }
-
-    /* Hide eye icon — target button and its parent wrapper */
-    button[data-testid="stTextInputPasswordToggle"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        overflow: hidden !important;
-    }
-    [data-testid="stTextInputPasswordToggle"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-    }
-    /* Hide the icon inside the button too */
-    button[data-testid="stTextInputPasswordToggle"] svg,
-    button[data-testid="stTextInputPasswordToggle"] * {
-        display: none !important;
-        visibility: hidden !important;
-    }
-    /* Hide wrapper span that holds the toggle */
-    .stTextInput [data-testid="stTextInputPasswordToggle"],
-    .stTextInput span:has(> button[data-testid="stTextInputPasswordToggle"]) {
-        display: none !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        overflow: hidden !important;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -137,9 +106,10 @@ def show():
     st.markdown("### Intelligent Customer Feedback Analyzer")
     st.divider()
 
+    # ── Initialize per-field validation state ──
     defaults = {
-        "rv_username": "",
-        "rv_username_ok": None,
+        "rv_username": "",        # last validated username
+        "rv_username_ok": None,   # True/False/None
         "rv_email": "",
         "rv_email_ok": None,
         "rv_submitted": False,
@@ -154,9 +124,11 @@ def show():
         # ── Username ──
         username = st.text_input("👤 Username", key="reg_username", placeholder="Choose a username")
 
+        # Real-time backend check (debounced: only re-check when value changes)
         if username and username != st.session_state.rv_username:
             st.session_state.rv_username = username
-            st.session_state.rv_username_ok = _check_username_available(username)
+            available = _check_username_available(username)
+            st.session_state.rv_username_ok = available
 
         if username:
             if st.session_state.rv_username_ok is False:
@@ -173,9 +145,12 @@ def show():
             if not EMAIL_RE.match(email):
                 _inline_error("Invalid email format")
             else:
+                # Only hit API when format is valid and value changed
                 if email != st.session_state.rv_email:
                     st.session_state.rv_email = email
-                    st.session_state.rv_email_ok = _check_email_available(email)
+                    available = _check_email_available(email)
+                    st.session_state.rv_email_ok = available
+
                 if st.session_state.rv_email_ok is False:
                     _inline_error("Email already registered")
                 elif st.session_state.rv_email_ok is True:
@@ -184,13 +159,11 @@ def show():
             _inline_error("Email is required")
 
         # ── Password ──
-        password = st.text_input("🔒 Password", type="password", key="reg_password",
-                                 placeholder="Min 8 chars, mixed case, number, symbol")
+        password = st.text_input("🔒 Password", type="password", key="reg_password", placeholder="Min 8 chars, mixed case, number, symbol")
         _render_password_checklist(password)
 
         # ── Confirm Password ──
-        confirm = st.text_input("🔒 Confirm Password", type="password", key="reg_confirm",
-                                placeholder="Re-enter password")
+        confirm = st.text_input("🔒 Confirm Password", type="password", key="reg_confirm", placeholder="Re-enter password")
         if confirm and password and confirm != password:
             _inline_error("Passwords do not match")
         elif confirm and password and confirm == password:
@@ -198,9 +171,12 @@ def show():
 
         # ── Security Question ──
         question = st.selectbox("🔑 Security Question", SECURITY_QUESTIONS, key="reg_question")
-        answer = st.text_input("🔑 Security Answer", key="reg_answer",
-                               placeholder="Case-insensitive — stored securely",
-                               help="Your answer will be hashed before storage")
+        answer = st.text_input(
+            "🔑 Security Answer",
+            key="reg_answer",
+            placeholder="Case-insensitive — stored securely",
+            help="Your answer will be hashed (bcrypt) before storage",
+        )
         if st.session_state.rv_submitted and not answer.strip():
             _inline_error("Security answer is required")
 
@@ -209,6 +185,8 @@ def show():
         # ── Submit ──
         if st.button("Create Account", type="primary", use_container_width=True, key="register_button"):
             st.session_state.rv_submitted = True
+
+            # --- Collect all validation errors ---
             errors = []
 
             if not username:
@@ -242,6 +220,7 @@ def show():
                     st.error(f"❌ {e}")
                 st.stop()
 
+            # --- Call API ---
             try:
                 response = requests.post(
                     f"{API_URL}/auth/register",
@@ -264,6 +243,7 @@ def show():
                     st.rerun()
                 else:
                     detail = response.json().get("detail", "Registration failed")
+                    # Map backend errors back to field-level hints
                     if "Username" in detail:
                         st.session_state.rv_username_ok = False
                     if "Email" in detail:
