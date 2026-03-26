@@ -34,42 +34,13 @@ def show():
     }
     .status-online  { background: #dcfce7; color: #166534; }
     .status-offline { background: #fee2e2; color: #991b1b; }
-
-    /* Hide eye icon — target button and its parent wrapper */
-    button[data-testid="stTextInputPasswordToggle"] {
+    [data-testid="stTextInput"] [data-testid="styled-input-container"] button {
         display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        overflow: hidden !important;
     }
-    [data-testid="stTextInputPasswordToggle"] {
+    input[type="password"]::-ms-reveal,
+    input[type="password"]::-ms-clear,
+    input[type="password"]::-webkit-credentials-auto-fill-button {
         display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        position: absolute !important;
-        width: 0 !important;
-        height: 0 !important;
-    }
-    /* Hide the icon inside the button too */
-    button[data-testid="stTextInputPasswordToggle"] svg,
-    button[data-testid="stTextInputPasswordToggle"] * {
-        display: none !important;
-        visibility: hidden !important;
-    }
-    /* Hide wrapper span that holds the toggle */
-    .stTextInput [data-testid="stTextInputPasswordToggle"],
-    .stTextInput span:has(> button[data-testid="stTextInputPasswordToggle"]) {
-        display: none !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        overflow: hidden !important;
     }
     </style>
     """, unsafe_allow_html=True)
