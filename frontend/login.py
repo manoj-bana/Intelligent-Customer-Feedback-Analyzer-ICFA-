@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import re
 
+from frontend.errors import ERROR_MESSAGES
+
 API_URL = "http://127.0.0.1:8000"
 
 PASSWORD_RE = re.compile(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$')
@@ -73,7 +75,7 @@ def show():
             with btn1:
                 if st.button("Sign In", type="primary", use_container_width=True):
                     if not username or not password:
-                        st.warning("⚠️ Username and password are required")
+                        st.warning(f"⚠️ {ERROR_MESSAGES['LOGIN_FIELDS_REQUIRED']}")
                     else:
                         try:
                             resp = requests.post(
@@ -89,12 +91,12 @@ def show():
                                 st.success("✅ Login successful!")
                                 st.rerun()
                             else:
-                                detail = resp.json().get("detail", "Invalid credentials")
+                                detail = resp.json().get("detail", ERROR_MESSAGES["INVALID_LOGIN"])
                                 st.error(f"❌ {detail}")
                         except requests.exceptions.ConnectionError:
-                            st.error("❌ Backend offline. Start the server and try again.")
+                            st.error(f"❌ {ERROR_MESSAGES['BACKEND_OFFLINE']}")
                         except Exception as exc:
-                            st.error(f"❌ Error: {exc}")
+                            st.error(f"❌ {ERROR_MESSAGES['UNEXPECTED_ERROR']}: {exc}")
             with btn2:
                 if st.button("Forgot?", key="forgot_link", help="Reset your password"):
                     st.session_state.show_forgot_password = True
@@ -123,7 +125,7 @@ def show():
                 fu = st.text_input("👤 Username", key="forgot_username_input")
                 if st.button("Continue", use_container_width=True):
                     if not fu.strip():
-                        st.warning("Please enter your username")
+                        st.warning(ERROR_MESSAGES["FORGOT_USERNAME_REQUIRED"])
                     else:
                         try:
                             resp = requests.post(
@@ -137,9 +139,9 @@ def show():
                                 st.session_state.forgot_step = 1
                                 st.rerun()
                             else:
-                                st.error(resp.json().get("detail", "User not found"))
+                                st.error(resp.json().get("detail", ERROR_MESSAGES["FORGOT_USER_NOT_FOUND"]))
                         except Exception as exc:
-                            st.error(f"Service error: {exc}")
+                            st.error(f"{ERROR_MESSAGES['FORGOT_SERVICE_ERROR']}: {exc}")
 
             # Step 1 — answer security question
             elif step == 1:
@@ -148,7 +150,7 @@ def show():
                 ans = st.text_input("🔒 Answer", type="password", key="forgot_answer")
                 if st.button("Verify Answer", use_container_width=True):
                     if not ans.strip():
-                        st.warning("Please enter your answer")
+                        st.warning(ERROR_MESSAGES["FORGOT_ANSWER_REQUIRED"])
                     else:
                         try:
                             resp = requests.post(
@@ -161,9 +163,9 @@ def show():
                                 st.session_state.forgot_step = 2
                                 st.rerun()
                             else:
-                                st.error(resp.json().get("detail", "Incorrect answer"))
+                                st.error(resp.json().get("detail", ERROR_MESSAGES["FORGOT_WRONG_ANSWER"]))
                         except Exception as exc:
-                            st.error(f"Service error: {exc}")
+                            st.error(f"{ERROR_MESSAGES['FORGOT_SERVICE_ERROR']}: {exc}")
 
             # Step 2 — set new password
             elif step == 2:
@@ -199,15 +201,15 @@ def show():
                     )
 
                 if confirm and new_pass != confirm:
-                    _inline_error("Passwords do not match")
+                    _inline_error(ERROR_MESSAGES["PASSWORD_MISMATCH"])
 
                 if st.button("Reset Password", type="primary", use_container_width=True):
                     if not new_pass or not confirm:
-                        st.warning("Both password fields are required")
+                        st.warning(ERROR_MESSAGES["PASSWORD_FIELDS_REQUIRED"])
                     elif new_pass != confirm:
-                        st.error("❌ Passwords do not match")
+                        st.error(f"❌ {ERROR_MESSAGES['PASSWORD_MISMATCH']}")
                     elif not PASSWORD_RE.match(new_pass):
-                        st.error("❌ Password does not meet all requirements")
+                        st.error(f"❌ {ERROR_MESSAGES['PASSWORD_REQUIREMENTS']}")
                     else:
                         try:
                             resp = requests.post(
@@ -220,12 +222,12 @@ def show():
                                 timeout=5,
                             )
                             if resp.status_code == 200:
-                                st.success("✅ Password reset successfully! Please sign in.")
+                                st.success(f"✅ {ERROR_MESSAGES['FORGOT_RESET_SUCCESS']}")
                                 for k in ["forgot_step", "forgot_username", "forgot_question", "forgot_temp_token"]:
                                     st.session_state.pop(k, None)
                                 st.session_state.show_forgot_password = False
                                 st.rerun()
                             else:
-                                st.error(resp.json().get("detail", "Reset failed"))
+                                st.error(resp.json().get("detail", ERROR_MESSAGES["FORGOT_RESET_FAILED"]))
                         except Exception as exc:
-                            st.error(f"Service error: {exc}")
+                            st.error(f"{ERROR_MESSAGES['FORGOT_SERVICE_ERROR']}: {exc}")

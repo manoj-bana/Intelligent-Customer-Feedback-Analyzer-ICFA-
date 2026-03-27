@@ -3,6 +3,8 @@ import requests
 import re
 import time
 
+from frontend.errors import ERROR_MESSAGES
+
 API_URL = "http://127.0.0.1:8000"
 
 EMAIL_RE = re.compile(r'^[\w\.-]+@[\w\.-]+\.\w+$')
@@ -131,28 +133,28 @@ def show():
 
         if username:
             if st.session_state.rv_username_ok is False:
-                _inline_error("Username already exists")
+                _inline_error(ERROR_MESSAGES["USERNAME_TAKEN"])
             elif st.session_state.rv_username_ok is True:
-                _inline_ok("Username available")
+                _inline_ok(ERROR_MESSAGES["USERNAME_AVAILABLE"])
         elif st.session_state.rv_submitted:
-            _inline_error("Username is required")
+            _inline_error(ERROR_MESSAGES["USERNAME_REQUIRED"])
 
         # ── Email ──
         email = st.text_input("📧 Email", key="reg_email", placeholder="you@example.com")
 
         if email:
             if not EMAIL_RE.match(email):
-                _inline_error("Invalid email format")
+                _inline_error(ERROR_MESSAGES["EMAIL_INVALID_FORMAT"])
             else:
                 if email != st.session_state.rv_email:
                     st.session_state.rv_email = email
                     st.session_state.rv_email_ok = _check_email_available(email)
                 if st.session_state.rv_email_ok is False:
-                    _inline_error("Email already registered")
+                    _inline_error(ERROR_MESSAGES["EMAIL_TAKEN"])
                 elif st.session_state.rv_email_ok is True:
-                    _inline_ok("Email available")
+                    _inline_ok(ERROR_MESSAGES["EMAIL_AVAILABLE"])
         elif st.session_state.rv_submitted:
-            _inline_error("Email is required")
+            _inline_error(ERROR_MESSAGES["EMAIL_REQUIRED"])
 
         # ── Password ──
         password = st.text_input("🔒 Password", type="password", key="reg_password",
@@ -163,9 +165,9 @@ def show():
         confirm = st.text_input("🔒 Confirm Password", type="password", key="reg_confirm",
                                 placeholder="Re-enter password")
         if confirm and password and confirm != password:
-            _inline_error("Passwords do not match")
+            _inline_error(ERROR_MESSAGES["PASSWORD_MISMATCH"])
         elif confirm and password and confirm == password:
-            _inline_ok("Passwords match")
+            _inline_ok(ERROR_MESSAGES["PASSWORD_MATCH"])
 
         # ── Security Question ──
         question = st.selectbox("🔑 Security Question", SECURITY_QUESTIONS, key="reg_question")
@@ -173,7 +175,7 @@ def show():
                                placeholder="Case-insensitive — stored securely",
                                help="Your answer will be hashed before storage")
         if st.session_state.rv_submitted and not answer.strip():
-            _inline_error("Security answer is required")
+            _inline_error(ERROR_MESSAGES["ANSWER_REQUIRED"])
 
         st.markdown("---")
 
@@ -183,30 +185,30 @@ def show():
             errors = []
 
             if not username:
-                errors.append("Username is required")
+                errors.append(ERROR_MESSAGES["USERNAME_REQUIRED"])
             elif st.session_state.rv_username_ok is False:
-                errors.append("Username already exists")
+                errors.append(ERROR_MESSAGES["USERNAME_TAKEN"])
 
             if not email:
-                errors.append("Email is required")
+                errors.append(ERROR_MESSAGES["EMAIL_REQUIRED"])
             elif not EMAIL_RE.match(email):
-                errors.append("Invalid email format")
+                errors.append(ERROR_MESSAGES["EMAIL_INVALID_FORMAT"])
             elif st.session_state.rv_email_ok is False:
-                errors.append("Email already registered")
+                errors.append(ERROR_MESSAGES["EMAIL_TAKEN"])
 
             pwd_checks = _password_strength(password)
             if not password:
-                errors.append("Password is required")
+                errors.append(ERROR_MESSAGES["PASSWORD_REQUIRED"])
             elif not all(pwd_checks.values()):
-                errors.append("Password does not meet all requirements (see checklist above)")
+                errors.append(ERROR_MESSAGES["PASSWORD_WEAK"])
 
             if not confirm:
-                errors.append("Please confirm your password")
+                errors.append(ERROR_MESSAGES["PASSWORD_CONFIRM_REQUIRED"])
             elif password != confirm:
-                errors.append("Passwords do not match")
+                errors.append(ERROR_MESSAGES["PASSWORD_MISMATCH"])
 
             if not answer.strip():
-                errors.append("Security answer is required")
+                errors.append(ERROR_MESSAGES["ANSWER_REQUIRED"])
 
             if errors:
                 for e in errors:
@@ -234,15 +236,15 @@ def show():
                     time.sleep(0.8)
                     st.rerun()
                 else:
-                    detail = response.json().get("detail", "Registration failed")
+                    detail = response.json().get("detail", ERROR_MESSAGES["REGISTER_FAILED"])
                     if "Username" in detail:
                         st.session_state.rv_username_ok = False
                     if "Email" in detail:
                         st.session_state.rv_email_ok = False
                     st.error(f"❌ {detail}")
             except requests.exceptions.ConnectionError:
-                st.error("❌ Backend not reachable. Run: `uvicorn backend.main:app --reload --port 8000`")
+                st.error(f"❌ {ERROR_MESSAGES['BACKEND_UNREACHABLE']}")
             except Exception as exc:
-                st.error(f"❌ Unexpected error: {exc}")
+                st.error(f"❌ {ERROR_MESSAGES['UNEXPECTED_ERROR']}: {exc}")
 
         st.caption("Passwords are stored using bcrypt hashing — never in plain text.")
