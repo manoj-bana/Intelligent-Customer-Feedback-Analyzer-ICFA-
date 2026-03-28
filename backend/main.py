@@ -1,12 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.auth import router as auth_router
-from backend.routes.feedback import router as feedback_router
-from backend.routes.churn import router as churn_router
+from backend.routes.ingest import router as ingest_router
 from backend.database.db import engine
 from backend.database.models import Base
-
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="ICFA API")
 
@@ -18,9 +15,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router,     prefix="/auth",     tags=["Auth"])
-app.include_router(feedback_router, prefix="/feedback", tags=["Feedback"])
-app.include_router(churn_router,    prefix="/churn",    tags=["Churn"])
+app.include_router(auth_router, prefix="/auth", tags=["Auth"])
+app.include_router(ingest_router, prefix="/ingest", tags=["Ingestion"])
 
 @app.get("/")
 def root():
