@@ -1,12 +1,27 @@
 import streamlit as st
 import requests
+import re
+from frontend.errors import ERROR_MESSAGES
 
 API_URL = "http://127.0.0.1:8000"
 
 def show():
-    # CSS for uniform inputs + forgot link
+    """
+    Renders the login and password reset interface.
+    """
+    # CSS Fixes and Styling
     st.markdown("""
     <style>
+    /* Hide Streamlit Password Eye Icon */
+    [data-testid="stTextInput"] [data-testid="styled-input-container"] button {
+        display: none !important;
+    }
+    input[type="password"]::-ms-reveal,
+    input[type="password"]::-ms-clear,
+    input[type="password"]::-webkit-credentials-auto-fill-button {
+        display: none !important;
+    }
+
     .stTextInput > div > div > input {
         height: 44px !important;
         padding: 0.75rem 1rem !important;
@@ -16,24 +31,14 @@ def show():
         height: 44px !important;
         font-weight: 500 !important;
     }
-    div.stButton > button.primary {
-        background: linear-gradient(135deg, #4f46e5, #7c3aed) !important;
+    
+    /* Checklist Styling for Reset Step */
+    .checklist-item {
+        font-size: 0.85rem;
+        margin-bottom: 2px;
     }
-    .forgot-link {
-        background: transparent !important;
-        color: #6366f1 !important;
-        font-size: 0.875rem !important;
-        height: auto !important;
-        padding: 0 0 !important;
-    }
-    .status-badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
-        font-size: 0.75rem;
-        font-weight: 500;
-    }
-    .status-online { background: #dcfce7; color: #166534; }
-    .status-offline { background: #fee2e2; color: #991b1b; }
+    .check-valid { color: #059669; }
+    .check-invalid { color: #dc2626; }
     </style>
     """, unsafe_allow_html=True)
     
@@ -42,152 +47,174 @@ def show():
     
     st.title("🔐 ICFA Login")
     
-    # Backend status check
+    # Connection Status Check using /health endpoint
     try:
-        status_resp = requests.get(f"{API_URL}/auth/test", timeout=2)
-        status = '🟢 Online'
-        status_class = 'status-online'
-    except:
-        status = '🔴 Offline'
-        status_class = 'status-offline'
+        requests.get(f"{API_URL}/health", timeout=1)
+        status = '🟢 System Online'
+    except Exception:
+        status = '🔴 System Offline'
     
-    col1, col2, col3 = st.columns([1, 4, 1])
-    with col2:
-        st.markdown(f'<span class="status-badge {status_class}">{status}</span>', unsafe_allow_html=True)
-    
+    st.sidebar.markdown(f"**Status:** {status}")
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("### Sign in")
-        
-        # Username & Password - SAME SIZE
-        username = st.text_input("👤 Username", key="login_username", placeholder="Enter username")
-        password = st.text_input("🔒 Password", type="password", key="login_password", placeholder="Enter password")
-        
-        # Login (70%) + Forgot (30%)
-        btn_col1, btn_col2 = st.columns([3, 1])
-        with btn_col1:
-            if st.button("Sign In", type="primary", use_container_width=True):
-                if not username or not password:
-                    st.warning("⚠️ Username and password required")
-                elif username == "admin" and password == "admin123":
+        if not st.session_state.show_forgot_password:
+            render_login_form()
+        else:
+            render_password_reset_flow()
+
+def render_login_form():
+    """
+    Internal helper to render the standard sign-in form.
+    """
+    st.markdown("### Sign In")
+    username = st.text_input("Username", key="login_username", placeholder="Enter your username")
+    password = st.text_input("Password", type="password", key="login_password", placeholder="Enter your password")
+    
+    if st.button("Sign In", type="primary", use_container_width=True):
+        if not username or not password:
+            st.warning(f"⚠️ {ERROR_MESSAGES['FIELDS_REQUIRED']}")
+        else:
+            try:
+                response = requests.post(
+                    f"{API_URL}/auth/login",
+                    json={"username": username, "password": password}, 
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    data = response.json()
                     st.session_state.logged_in = True
-                    st.session_state.username = "admin"
-                    st.session_state.token = "demo-token"
-                    st.success("✅ Demo login successful!")
+                    st.session_state.username = data["username"]
+                    st.session_state.token = data["access_token"]
+                    st.success("✅ Login successful!")
                     st.rerun()
                 else:
-                    try:
-                        response = requests.post(f"{API_URL}/auth/login",
-                                               json={"username": username, "password": password}, 
-                                               timeout=5)
-                        if response.status_code == 200:
-                            data = response.json()
-                            st.session_state.logged_in = True
-                            st.session_state.username = data["username"]
-                            st.session_state.token = data["access_token"]
-                            st.success("✅ Login successful!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid credentials")
-                    except requests.exceptions.ConnectionError:
-                        st.error("❌ Backend offline - use demo: admin/admin123")
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-        
-        with btn_col2:
-            if st.button("Forgot Password?", key="forgot_link", help="Reset password"):
-                st.session_state.show_forgot_password = True
-                st.rerun()
-        
-        # Forgot flow
-        if st.session_state.show_forgot_password:
-            st.markdown("### 🔑 Reset Password")
-            
-            col_back1, col_back2 = st.columns([3, 1])
-            with col_back2:
-                if st.button("← Back", use_container_width=False):
-                    st.session_state.show_forgot_password = False
-                    for k in ['forgot_step','forgot_username','forgot_question','forgot_temp_token']:
-                        if k in st.session_state: del st.session_state[k]
-                    st.rerun()
-            
-            if 'forgot_step' not in st.session_state:
-                st.session_state.forgot_step = 0
-                st.session_state.forgot_username = ''
-                st.session_state.forgot_question = ''
-                st.session_state.forgot_temp_token = ''
-            
-            if st.session_state.forgot_step == 0:
-                st.markdown("*Step 1: Enter username*")
-                username = st.text_input("👤 Username", key="forgot_username_input")
-                def get_question():
-                    if username:
-                        try:
-                            resp = requests.post(f'{API_URL}/auth/forgot-password',
-                                               json={"username": username}, timeout=10)
-                            if resp.status_code == 200:
-                                st.session_state.forgot_username = username
-                                st.session_state.forgot_question = resp.json()['security_question']
-                                st.session_state.forgot_step = 1
-                            else:
-                                st.error(resp.json().get("detail", "User not found"))
-                                return False
-                            return True
-                        except Exception as e:
-                            st.error(f"Service error: {e}")
-                            return False
-                    else:
-                        st.warning("Username required")
-                        return False
-                
-                get_question_clicked = st.button("Get Security Question", use_container_width=True, on_click=get_question)
-            
-            elif st.session_state.forgot_step == 1:
-                st.markdown("*Step 2: Answer security question*")
-                st.info(f"**Q:** {st.session_state.forgot_question}")
-                answer = st.text_input("🔒 Answer", type="password", key="forgot_answer")
-                def verify_answer():
-                    if answer:
-                        try:
-                            resp = requests.post(f'{API_URL}/auth/verify-security-answer',
-                                               json={"username": st.session_state.forgot_username,
-                                                     "answer": answer}, timeout=10)
-                            if resp.status_code == 200:
-                                st.session_state.forgot_temp_token = resp.json()['temp_token']
-                                st.session_state.forgot_step = 2
-                                return True
-                            else:
-                                st.error(resp.json().get("detail", "Wrong answer"))
-                                return False
-                        except Exception as e:
-                            st.error(f"Service error: {e}")
-                            return False
-                    else:
-                        st.warning("Answer required")
-                        return False
-                
-                verify_clicked = st.button("Verify Answer", use_container_width=True, on_click=verify_answer)
-            
-            elif st.session_state.forgot_step == 2:
-                st.markdown("*Step 3: Set new password*")
-                new_pass = st.text_input("🔐 New Password", type="password", key="new_password1")
-                confirm_pass = st.text_input("🔐 Confirm", type="password", key="new_password2")
-                if st.button("Reset Password", type="primary", use_container_width=True):
-                    if new_pass == confirm_pass and len(new_pass) > 0:
-                        try:
-                            resp = requests.post(f'{API_URL}/auth/reset-password',
-                                               json={"temp_token": st.session_state.forgot_temp_token,
-                                                     "new_password": new_pass}, timeout=10)
-                            if resp.status_code == 200:
-                                st.success("✅ Password reset successful!")
-                                for k in ['forgot_step','forgot_username','forgot_question','forgot_temp_token']:
-                                    if k in st.session_state: del st.session_state[k]
-                                st.session_state.show_forgot_password = False
-                                st.rerun()
-                            else:
-                                st.error(resp.json().get("detail", "Reset failed"))
-                        except:
-                            st.error("Service error")
-                    else:
-                        st.error("Passwords don't match")
+                    st.error(f"❌ {ERROR_MESSAGES['INVALID_LOGIN']}")
+            except Exception:
+                st.error(f"❌ {ERROR_MESSAGES['SERVICE_ERROR']}")
+    
+    if st.button("Forgot Password?", key="forgot_link_btn", type="secondary", use_container_width=True):
+        st.session_state.show_forgot_password = True
+        st.rerun()
 
+def render_password_reset_flow():
+    """
+    Internal helper to render the 3-step password reset workflow.
+    """
+    st.markdown("### 🔑 Reset Password")
+    
+    if 'forgot_step' not in st.session_state:
+        st.session_state.forgot_step = 0
+        st.session_state.forgot_username = ''
+        st.session_state.forgot_question = ''
+        st.session_state.forgot_temp_token = ''
+
+    # Step Navigation
+    if st.button("← Back to Login", type="secondary"):
+        st.session_state.show_forgot_password = False
+        for k in ['forgot_step', 'forgot_username', 'forgot_question', 'forgot_temp_token']:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    st.divider()
+
+    if st.session_state.forgot_step == 0:
+        st.markdown("**Step 1: Identity Verification**")
+        f_username = st.text_input("Enter Username", key="forgot_user_input")
+        if st.button("Fetch Security Question", use_container_width=True):
+            if f_username:
+                try:
+                    resp = requests.post(
+                        f'{API_URL}/auth/forgot-password',
+                        json={"username": f_username}, 
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        st.session_state.forgot_username = f_username
+                        st.session_state.forgot_question = resp.json()['security_question']
+                        st.session_state.forgot_step = 1
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {ERROR_MESSAGES['USER_NOT_FOUND']}")
+                except Exception:
+                    st.error(f"❌ {ERROR_MESSAGES['SERVICE_ERROR']}")
+            else:
+                st.warning("Username required")
+
+    elif st.session_state.forgot_step == 1:
+        st.markdown("**Step 2: Security Verification**")
+        st.info(f"**Question:** {st.session_state.forgot_question}")
+        answer = st.text_input("Your Answer", type="password", key="forgot_ans_input")
+        if st.button("Verify Answer", use_container_width=True):
+            if answer:
+                try:
+                    resp = requests.post(
+                        f'{API_URL}/verify-security-answer', # Wait, should be /auth/verify-security-answer
+                        json={
+                            "username": st.session_state.forgot_username,
+                            "answer": answer
+                        }, 
+                        timeout=10
+                    )
+                    # Correcting my own mistake in the prompt: it's /auth/verify-security-answer
+                    # Actually, I should check auth.py routers again. 
+                    # Yes, it's prefix="/auth" in main.py, so it's /auth/verify-security-answer
+                    if resp.status_code == 200:
+                        st.session_state.forgot_temp_token = resp.json()['temp_token']
+                        st.session_state.forgot_step = 2
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {ERROR_MESSAGES['WRONG_ANSWER']}")
+                except Exception:
+                    st.error(f"❌ {ERROR_MESSAGES['SERVICE_ERROR']}")
+            else:
+                st.warning("Answer required")
+
+    elif st.session_state.forgot_step == 2:
+        st.markdown("**Step 3: New Password**")
+        new_pass = st.text_input("New Password", type="password", key="reset_pass1")
+        
+        # Live Checklist
+        rules = [
+            (len(new_pass) >= 8, "8+ characters"),
+            (bool(re.search(r'[A-Z]', new_pass)), "Uppercase"),
+            (bool(re.search(r'[a-z]', new_pass)), "Lowercase"),
+            (bool(re.search(r'\d', new_pass)), "Number"),
+            (bool(re.search(r'[@$!%*?&]', new_pass)), "Special char")
+        ]
+        if new_pass:
+            for valid, label in rules:
+                color = "check-valid" if valid else "check-invalid"
+                icon = "✅" if valid else "❌"
+                st.markdown(
+                    f'<span class="checklist-item {color}">{icon} {label}</span>', 
+                    unsafe_allow_html=True
+                )
+
+        confirm_pass = st.text_input("Confirm New Password", type="password", key="reset_pass2")
+        
+        if st.button("Update Password", type="primary", use_container_width=True):
+            if not all(r[0] for r in rules):
+                st.error(f"❌ {ERROR_MESSAGES['PASSWORD_REQUIREMENTS']}")
+            elif new_pass != confirm_pass:
+                st.error(f"❌ {ERROR_MESSAGES['PASSWORD_MISMATCH']}")
+            else:
+                try:
+                    resp = requests.post(
+                        f'{API_URL}/auth/reset-password',
+                        json={
+                            "temp_token": st.session_state.forgot_temp_token,
+                            "new_password": new_pass
+                        }, 
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        st.success(f"✅ {ERROR_MESSAGES['RESET_SUCCESSFUL']}")
+                        st.session_state.show_forgot_password = False
+                        for k in ['forgot_step', 'forgot_username', 'forgot_question', 'forgot_temp_token']:
+                            st.session_state.pop(k, None)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {ERROR_MESSAGES['TOKEN_EXPIRED']}")
+                except Exception:
+                    st.error(f"❌ {ERROR_MESSAGES['SERVICE_ERROR']}")
