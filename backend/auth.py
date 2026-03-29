@@ -71,12 +71,6 @@ def register(data: RegisterRequest):
     password_pattern = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
     email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
  
-    if not re.match(email_pattern, data.email):
-        raise HTTPException(status_code=400, detail="Invalid email format")
-    if data.username in USERS_DB:
-        raise HTTPException(status_code=400, detail="Username already exists")
-    if data.email.lower() in EMAILS_DB:
-        raise HTTPException(status_code=400, detail="Email already registered")
     if len(data.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be 8+ chars")
     if not re.match(password_pattern, data.password):
@@ -84,8 +78,16 @@ def register(data: RegisterRequest):
     if not data.security_question or not data.security_answer:
         raise HTTPException(status_code=400, detail="Security question and answer required")
 
-    # Store in DB
+    # Check uniqueness in DB first (more reliable than USERS_DB)
     db = SessionLocal()
+    existing_user = db.query(User).filter((User.username == data.username) | (User.email == data.email.lower())).first()
+    if existing_user:
+        db.close()
+        if existing_user.username == data.username:
+            raise HTTPException(status_code=400, detail="Username already exists")
+        else:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
     try:
         new_user = User(
             username=data.username,

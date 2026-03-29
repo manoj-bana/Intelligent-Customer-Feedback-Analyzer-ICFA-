@@ -42,6 +42,13 @@ def predict_churn(df: pd.DataFrame) -> dict:
             )
         }
 
+    # FIX: Ensure all features expected by the model are present and in the correct order
+    if hasattr(model, "feature_names_in_"):
+        for col in model.feature_names_in_:
+            if col not in processed.columns:
+                processed[col] = 0
+        processed = processed[list(model.feature_names_in_)]
+
     probs = model.predict_proba(processed)[:, 1]
     predictions = (probs >= 0.5).astype(int)
 

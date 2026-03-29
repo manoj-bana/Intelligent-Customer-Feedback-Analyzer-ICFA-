@@ -26,14 +26,35 @@ def show():
 
         if st.button("📉 Predict Churn", use_container_width=True):
             try:
-                with st.spinner("Predicting..."):
+                with st.spinner("Uploading and starting job..."):
+                    import time
                     response = requests.post(
                         f"{API_URL}/churn/predict",
                         files={"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")},
-                        timeout=60
+                        timeout=120
                     )
                 if response.status_code == 200:
-                    show_churn_results(response.json())
+                    resp_json = response.json()
+                    job_id = resp_json.get("job_id")
+                    if job_id:
+                        progress_container = st.empty()
+                        with st.spinner("Job started..."):
+                            while True:
+                                res_status = requests.get(f"{API_URL}/churn/result/{job_id}", timeout=60).json()
+                                if res_status.get("status") == "completed":
+                                    progress_container.empty()
+                                    show_churn_results(res_status.get("data"))
+                                    break
+                                elif res_status.get("status") == "failed":
+                                    progress_container.empty()
+                                    st.error(f"Processing failed: {res_status.get('error')}")
+                                    break
+                                else:
+                                    msg = res_status.get("message", "Processing in background...")
+                                    progress_container.info(f"⏳ {msg}")
+                                time.sleep(0.3)
+                    else:
+                        show_churn_results(resp_json)
                 else:
                     st.error(f"API Error: {response.text}")
             except requests.exceptions.ConnectionError:

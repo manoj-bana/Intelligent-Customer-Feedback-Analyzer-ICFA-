@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from backend.main import app
+import time
 
 client = TestClient(app)
 
@@ -18,7 +19,16 @@ Customer support was helpful
 
     assert response.status_code == 200
 
-    data = response.json()
+    job_id = response.json()["job_id"]
+    data = None
+    for _ in range(10):
+        res = client.get(f"/feedback/result/{job_id}").json()
+        if res.get("status") == "completed":
+            data = res["data"]
+            break
+        time.sleep(0.5)
+    else:
+        assert False, "Background task timed out"
 
     assert "total" in data
     assert "results" in data
@@ -50,5 +60,14 @@ def test_feedback_no_text_column():
         files={"file": ("test.csv", csv_content, "text/csv")}
     )
 
-    assert response.status_code == 400
-    assert "No text column found" in response.json()["detail"]
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    error_msg = ""
+    for _ in range(10):
+        res = client.get(f"/feedback/result/{job_id}").json()
+        if res.get("status") == "failed":
+            error_msg = res.get("error", "")
+            break
+        time.sleep(0.5)
+    
+    assert "No text column found" in error_msg

@@ -28,14 +28,35 @@ def show():
 
         if st.button("🔍 Analyze Sentiment", use_container_width=True):
             try:
-                with st.spinner("Analyzing... (first run may take 1-2 mins to load the model)"):
+                with st.spinner("Uploading and starting job... (first run may take 1-2 mins)"):
+                    import time
                     response = requests.post(
                         f"{API_URL}/feedback/analyze",
                         files={"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")},
                         timeout=120
                     )
                 if response.status_code == 200:
-                    st.session_state.analysis_results = response.json()
+                    resp_json = response.json()
+                    job_id = resp_json.get("job_id")
+                    if job_id:
+                        progress_container = st.empty()
+                        with st.spinner("Job started..."):
+                            while True:
+                                res_status = requests.get(f"{API_URL}/feedback/result/{job_id}", timeout=60).json()
+                                if res_status.get("status") == "completed":
+                                    st.session_state.analysis_results = res_status.get("data")
+                                    progress_container.empty()
+                                    break
+                                elif res_status.get("status") == "failed":
+                                    st.error(f"Processing failed: {res_status.get('error')}")
+                                    progress_container.empty()
+                                    break
+                                else:
+                                    msg = res_status.get("message", "Processing in background...")
+                                    progress_container.info(f"⏳ {msg}")
+                                time.sleep(0.3)
+                    else:
+                        st.session_state.analysis_results = resp_json
                 else:
                     st.error(f"API Error: {response.text}")
             except requests.exceptions.ConnectionError:
