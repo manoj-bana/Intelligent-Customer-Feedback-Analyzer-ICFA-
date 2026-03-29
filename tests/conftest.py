@@ -33,14 +33,9 @@ auth_module.SessionLocal = _TestSessionLocal
 import backend.routes.ingest as ingest_module
 ingest_module.SessionLocal = _TestSessionLocal
 
-# ── Snapshot original in-memory user stores ──
-_ORIG_USERS_DB = dict(auth_module.USERS_DB)
-_ORIG_EMAILS_DB = set(auth_module.EMAILS_DB)
-
-
 @pytest.fixture(autouse=True)
 def reset_state_between_tests():
-    """Truncate DB tables and restore in-memory auth dicts before each test."""
+    """Truncate DB tables before each test."""
     with _test_engine.connect() as conn:
         for table in ["users", "feedback", "churn_predictions", "datasets"]:
             try:
@@ -48,11 +43,6 @@ def reset_state_between_tests():
             except Exception:
                 pass
         conn.commit()
-
-    auth_module.USERS_DB.clear()
-    auth_module.USERS_DB.update(_ORIG_USERS_DB)
-    auth_module.EMAILS_DB.clear()
-    auth_module.EMAILS_DB.update(_ORIG_EMAILS_DB)
 
     yield
 

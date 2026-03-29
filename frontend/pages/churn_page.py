@@ -1,6 +1,7 @@
 import requests
 import streamlit as st
 import pandas as pd
+from frontend.utils.export_utils import export_to_format
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -9,17 +10,6 @@ def show():
     Main entry point for the Churn Prediction report page. 
     Handles dataset selection and prediction results visualization.
     """
-    username = st.session_state.get("username", "")
-    if not username:
-        st.error("Authentication Error: Please login to access reports.")
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
-        return
-=======
-    username = st.session_state.get("username", "")
-    if not username:
-        st.error("Authentication Error: Please login to access reports.")
-        return
-=======
     st.title("📉 Churn Prediction")
     st.markdown("Select an ingested dataset to view the churn prediction report.")
     st.divider()
@@ -27,12 +17,6 @@ def show():
     username = st.session_state.get("username", "")
     if not username:
         st.error("Authentication Error: Please login to access reports.")
-        return
-=======
-    username = st.session_state.get("username", "")
-    if not username:
-        st.error("Authentication Error: Please login to access reports.")
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
         return
 
     # Fetch user's cases safely
@@ -97,6 +81,25 @@ def show_churn_results(data):
     c2.metric("Predicted Churn", data["predicted_churn"], delta_color="inverse")
     c3.metric("Projected Churn Rate", f"{data['churn_rate']}%", delta_color="inverse")
     st.divider()
+    
+    # Export Section
+    st.subheader("📥 Export Prediction Report")
+    df_churn = pd.DataFrame(data["predictions"])
+    col_fmt, col_btn = st.columns([1, 1])
+    with col_fmt:
+        export_fmt = st.selectbox("Select Format", ["CSV", "Excel", "DOCX", "PDF"], key="churn_export_fmt")
+    
+    export_data = export_to_format(df_churn, export_fmt, title="Customer Churn Prediction Report")
+    
+    with col_btn:
+        st.write("") # Padding
+        st.download_button(
+            label=f"⬇️ Download as {export_fmt}",
+            data=export_data,
+            file_name=f"churn_report.{export_fmt.lower()}",
+            mime="application/octet-stream",
+            use_container_width=True,
+        )
 
     # --- Detailed Data Grid ---
     st.subheader("Individual Customer Risk Profile")

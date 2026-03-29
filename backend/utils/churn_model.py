@@ -112,29 +112,6 @@ def predict_churn(df: pd.DataFrame) -> dict:
         return {"error": "No matching feature columns found."}
     
     # Calculate probabilities and binary predictions
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
-
-=======
-    processed = preprocess(df, model=model)
-    if processed.empty:
-        return {"error": "No matching feature columns found."}
-
-    # FIX: Ensure all features expected by the model are present and in the correct order
-    if hasattr(model, "feature_names_in_"):
-        for col in model.feature_names_in_:
-            if col not in processed.columns:
-                processed[col] = 0
-        processed = processed[list(model.feature_names_in_)]
-
-
-=======
-    
-    processed = preprocess(df, model=model)
-    if processed.empty:
-        return {"error": "No matching feature columns found."}
-    
-    # Calculate probabilities and binary predictions
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
     probs = model.predict_proba(processed)[:, 1]
     predictions = (probs >= 0.5).astype(int)
     

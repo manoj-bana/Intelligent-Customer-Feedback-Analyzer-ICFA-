@@ -1,28 +1,3 @@
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
-"""
-Integration tests for the ingestion pipeline API: upload, list, results, retry, delete.
-"""
-import os
-import io
-
-
-<<<<<<< HEAD
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-    
-    data = None
-    for _ in range(10):
-        res = client.get(f"/feedback/result/{job_id}").json()
-        if res.get("status") == "completed":
-            data = res["data"]
-            break
-        time.sleep(0.5)
-    else:
-        assert False, "Job did not complete in time"
-=======
-# ─── UPLOAD ───
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
-=======
 """
 Integration tests for the ingestion pipeline API: upload, list, results, retry, delete.
 """
@@ -31,31 +6,6 @@ import io
 
 
 # ─── UPLOAD ───
-=======
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
-"""
-Integration tests for the ingestion pipeline API: upload, list, results, retry, delete.
-"""
-import os
-import io
-
-
-<<<<<<< HEAD
-    assert response.status_code == 200
-    job_id = response.json()["job_id"]
-    
-    data = None
-    for _ in range(10):
-        res = client.get(f"/feedback/result/{job_id}").json()
-        if res.get("status") == "completed":
-            data = res["data"]
-            break
-        time.sleep(0.5)
-    else:
-        assert False, "Job did not complete in time"
-=======
-# ─── UPLOAD ───
->>>>>>> bd5c89ca96a5b8bb623b80c2b284d392f6a492ae
 
 def test_upload_sentiment_csv(client, registered_user):
     csv_content = "review,rating\nGreat product!,5\nTerrible quality.,1\n"
