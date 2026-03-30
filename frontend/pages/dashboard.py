@@ -11,15 +11,31 @@ def show():
     st.sidebar.title(f"👤 {st.session_state.username}")
     st.sidebar.markdown("---")
 
+    # Handle page persistence in query params
+    pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
+    query_page = st.query_params.get("page", "🏠 Home")
+    page_index = 0
+    if query_page in pages:
+        page_index = pages.index(query_page)
+
     page = st.sidebar.radio(
         "Navigate",
-        ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
+        pages,
+        index=page_index
     )
+    
+    # Update query params to current page if it changed
+    if st.query_params.get("page") != page:
+        st.query_params["page"] = page
 
     if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.session_state.token = ""
+        
+        # Clear query params to prevent auto-login on refresh
+        st.query_params.clear()
+        
         st.rerun()
 
     if page == "🏠 Home":

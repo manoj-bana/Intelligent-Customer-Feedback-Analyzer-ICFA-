@@ -148,7 +148,7 @@ def show():
             key="reg_answer", 
             placeholder="Your secret answer"
         )
-        st.caption("🔒 Your answer is normalized and hashed for security.")
+        # st.caption("🔒 Your answer is normalized and hashed for security.")
 
         if st.button("Complete Registration", use_container_width=True, type="primary"):
             # Final validation
@@ -184,6 +184,11 @@ def show():
                             st.session_state.logged_in = True
                             st.session_state.username = data["username"]
                             st.session_state.token = data["access_token"]
+                            
+                            # Store in query params for browser refresh persistence
+                            st.query_params["token"] = data["access_token"]
+                            st.query_params["username"] = data["username"]
+                            
                             st.success(f"✅ {ERROR_MESSAGES['REGISTRATION_SUCCESSFUL']}")
                             st.rerun()
                         else:

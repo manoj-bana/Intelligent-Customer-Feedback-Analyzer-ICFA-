@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.auth import router as auth_router
@@ -6,6 +7,10 @@ from backend.database.db import engine
 from backend.database.models import Base
 
 app = FastAPI(title="ICFA API")
+
+# Ensure the uploads directory exists in the root directory
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,

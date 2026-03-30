@@ -11,7 +11,7 @@ ERROR_MESSAGES = {
     "REGISTRATION_SUCCESSFUL": "Registration successful!",
     "FIELDS_REQUIRED": "Please fill all required fields",
     "PASSWORD_REQUIREMENTS": "Password does not meet security requirements",
-    "SERVICE_ERROR": "Service service error, please try again later",
+"SERVICE_ERROR": "Service error, please try again later",
     "BACKEND_OFFLINE": "Backend service is currently unavailable",
     "TOKEN_EXPIRED": "Reset token expired or invalid"
 }

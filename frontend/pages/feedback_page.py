@@ -14,6 +14,7 @@ from analytics_dashboard.charts import (
     generate_wordcloud
 )
 from analytics_dashboard.data_loader import aggregate_user_data
+from frontend.utils.export_utils import export_to_format
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -61,10 +62,9 @@ def show():
         list(case_mapping.keys()), 
         key="select_sentiment_dataset"
     )
-    
     if st.button("📊 View Report", use_container_width=True, key="btn_view_sentiment"):
         case_id = case_mapping[selected_case_label]
-        with st.spinner("Fetching report data..."):
+        with st.spinner("Fetching analysis results..."):
             try:
                 res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
                 if res.status_code == 200:
@@ -98,22 +98,34 @@ def show_results(data):
         results_df.rename(columns={'review': 'feedback_text'}, inplace=True)
 
     df_enriched = None
-    # Check if Enriched CSV is available for Download and Data Parsing
     if "enriched_csv" in data and data["enriched_csv"]:
-        csv_bytes = base64.b64decode(data["enriched_csv"])
-        st.download_button(
-            label="⬇️ Download Enriched Results (CSV)",
-            data=csv_bytes,
-            file_name="feedback_sentiment_report.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-        st.divider()
         try:
+            csv_bytes = base64.b64decode(data["enriched_csv"])
             df_enriched = pd.read_csv(io.BytesIO(csv_bytes))
             df_enriched = normalize_dataframe_columns(df_enriched)
         except Exception as e:
             st.error(f"Error parsing enriched dataset: {e}")
+
+    # Export Section
+    if df_enriched is not None or not results_df.empty:
+        st.subheader("📥 Export Analysis Report")
+        col_fmt, col_btn = st.columns([1, 1])
+        with col_fmt:
+            export_fmt = st.selectbox("Select Format", ["CSV", "Excel", "DOCX", "PDF"], key="feedback_export_fmt")
+        
+        df_export = df_enriched if df_enriched is not None else results_df
+        export_data = export_to_format(df_export, export_fmt, title="Customer Feedback Sentiment Report")
+        
+        with col_btn:
+            st.write("") # Padding
+            st.download_button(
+                label=f"⬇️ Download as {export_fmt}",
+                data=export_data,
+                file_name=f"feedback_report.{export_fmt.lower()}",
+                mime="application/octet-stream",
+                use_container_width=True,
+            )
+        st.divider()
 
     df_to_plot = df_enriched if df_enriched is not None and not df_enriched.empty else results_df
 

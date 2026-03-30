@@ -4,6 +4,22 @@ from collections import Counter
 # Global cache for lazy loading heavy ML/NLTK resources
 _resources = {"sia": None, "stop_words": None}
 
+# Domain-specific stop words to exclude from keyword extraction
+STOP_WORDS = {
+    "product", "products", "item", "items", "thing", "things",
+    "good", "great", "nice", "fine", "okay", "like", "love",
+    "also", "well", "just", "get", "got", "one", "two", "use",
+    "used", "using", "really", "very", "much", "way", "even",
+    "would", "could", "still", "first", "last", "little", "lot",
+    "many", "every", "make", "made", "work", "works", "working",
+    "back", "give", "given", "come", "came", "look", "looks",
+    "feel", "felt", "put", "take", "run", "keep", "went",
+    "day", "days", "time", "never", "always", "since", "now",
+    "can", "will", "need", "want", "know", "think", "may", "bit",
+    "br", "http", "https", "www", "com", "href", "src",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+}
+
 def _get_resources():
     """
     Lazy loader for NLTK and sentiment analysis resources.
@@ -18,21 +34,21 @@ def _get_resources():
         nltk.download("vader_lexicon", quiet=True)
         
         _resources["sia"] = SentimentIntensityAnalyzer()
-        _resources["stop_words"] = set(stopwords.words("english")) | {
-            "product", "products", "item", "items", "thing", "things",
-            "good", "great", "nice", "fine", "okay", "like", "love",
-            "also", "well", "just", "get", "got", "one", "two", "use",
-            "used", "using", "really", "very", "much", "way", "even",
-            "would", "could", "still", "first", "last", "little", "lot",
-            "many", "every", "make", "made", "work", "works", "working",
-            "back", "give", "given", "come", "came", "look", "looks",
-            "feel", "felt", "put", "take", "run", "keep", "went",
-            "day", "days", "time", "never", "always", "since", "now",
-            "can", "will", "need", "want", "know", "think", "may", "bit",
-            "br", "http", "https", "www", "com", "href", "src",
-            "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        }
+        _resources["stop_words"] = set(stopwords.words("english")) | STOP_WORDS
     return _resources["sia"], _resources["stop_words"]
+
+def _clean_text_for_keywords(text: str) -> str:
+    """
+    Standard cleaning pipeline for keyword extraction: 
+    HTML removal, URL filtering, noise stripping.
+    """
+    # Remove HTML tags
+    cleaned = re.sub(r'<[^>]+>', ' ', str(text))
+    # Remove URLs
+    cleaned = re.sub(r'https?://\S+|www\.\S+', ' ', cleaned)
+    # Remove everything except letters and spaces
+    cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).lower()
+    return cleaned
 
 def analyze_sentiment(text: str) -> dict:
     """
@@ -70,9 +86,7 @@ def extract_keywords_frequency(texts: list, top_n: int = 15) -> list:
     _, stop_words = _get_resources()
     
     for text in texts:
-        cleaned = re.sub(r'<[^>]+>', ' ', str(text))
-        cleaned = re.sub(r'https?://\S+|www\.\S+', ' ', cleaned)
-        cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).lower()
+        cleaned = _clean_text_for_keywords(text)
         words = re.findall(r'\b[a-zA-Z]{4,}\b', cleaned)
         all_words.extend([w for w in words if w not in stop_words])
         
@@ -90,16 +104,7 @@ def extract_keywords_tfidf(texts: list, top_n: int = 15) -> list:
         return extract_keywords_frequency(texts, top_n)
         
     cleaned_texts = [
-        re.sub(
-            r'\s+', ' ', 
-            re.sub(
-                r'[^a-zA-Z\s]', ' ', 
-                re.sub(
-                    r'https?://\S+|www\.\S+', ' ', 
-                    re.sub(r'<[^>]+>', ' ', str(t))
-                )
-            )
-        ).strip().lower() 
+        re.sub(r'\s+', ' ', _clean_text_for_keywords(t)).strip()
         for t in texts
     ]
     

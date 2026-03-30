@@ -219,6 +219,10 @@ def delete_case(case_id: str):
         if os.path.exists(enriched_path):
             os.remove(enriched_path)
             
+        results_path = f"{dataset.file_path}_results.json"
+        if os.path.exists(results_path):
+            os.remove(results_path)
+            
         db.delete(dataset)
         db.commit()
         return {"message": "Case deleted"}

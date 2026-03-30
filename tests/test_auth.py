@@ -60,6 +60,18 @@ def test_register_duplicate_username(client, registered_user):
     assert "already exists" in res.json()["detail"]
 
 
+def test_register_duplicate_email(client, registered_user):
+    res = client.post("/auth/register", json={
+        "username": "otheruser",
+        "email": registered_user["email"],
+        "password": "Strong@123",
+        "security_question": "Q?",
+        "security_answer": "A"
+    })
+    assert res.status_code == 400
+    assert "Email already registered" in res.json()["detail"]
+
+
 def test_register_weak_password(client):
     res = client.post("/auth/register", json={
         "username": "weakuser",
@@ -68,6 +80,7 @@ def test_register_weak_password(client):
         "security_question": "Q?",
         "security_answer": "A"
     })
+    # Since password strength validation is at the backend, checking for 400
     assert res.status_code == 400
 
 
