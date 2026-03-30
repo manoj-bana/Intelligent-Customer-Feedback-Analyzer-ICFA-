@@ -86,6 +86,11 @@ def render_login_form():
                     st.session_state.logged_in = True
                     st.session_state.username = data["username"]
                     st.session_state.token = data["access_token"]
+                    
+                    # Store in query params for browser refresh persistence
+                    st.query_params["token"] = data["access_token"]
+                    st.query_params["username"] = data["username"]
+                    
                     st.success("✅ Login successful!")
                     st.rerun()
                 else:

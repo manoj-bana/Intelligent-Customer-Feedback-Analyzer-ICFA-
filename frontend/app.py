@@ -25,7 +25,16 @@ st.markdown(
 
 # --- Session State Initialization ---
 if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+    # Check for persistent session in query params to handle browser refresh
+    q_token = st.query_params.get("token")
+    q_username = st.query_params.get("username")
+    
+    if q_token and q_username:
+        st.session_state.logged_in = True
+        st.session_state.token = q_token
+        st.session_state.username = q_username
+    else:
+        st.session_state.logged_in = False
 
 if "username" not in st.session_state:
     st.session_state.username = ""
