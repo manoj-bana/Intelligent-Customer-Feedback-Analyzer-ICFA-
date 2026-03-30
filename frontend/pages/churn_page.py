@@ -1,80 +1,122 @@
-import streamlit as st
 import requests
+import streamlit as st
 import pandas as pd
+from frontend.utils.export_utils import export_to_format
 
 API_URL = "http://127.0.0.1:8000"
 
-
 def show():
+    """
+    Main entry point for the Churn Prediction report page. 
+    Handles dataset selection and prediction results visualization.
+    """
     st.title("📉 Churn Prediction")
-    st.markdown(
-        "Upload a CSV with columns: "
-        "`tenure`, `MonthlyCharges`, `TotalCharges`, "
-        "`Contract`, `PaymentMethod`, `InternetService`"
-    )
-    st.info("💡 Use the Telco Customer Churn dataset from Kaggle to test this")
+    st.markdown("Select an ingested dataset to view the churn prediction report.")
     st.divider()
 
-    uploaded_file = st.file_uploader("📂 Upload CSV file", type=["csv"])
-
-    if uploaded_file:
-        df_preview = pd.read_csv(uploaded_file)
-        uploaded_file.seek(0)
-        st.markdown("**Preview:**")
-        st.dataframe(df_preview.head(), use_container_width=True)
-        st.divider()
-
-        if st.button("📉 Predict Churn", use_container_width=True):
-            try:
-                with st.spinner("Predicting..."):
-                    response = requests.post(
-                        f"{API_URL}/churn/predict",
-                        files={"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")},
-                        timeout=60
-                    )
-                if response.status_code == 200:
-                    show_churn_results(response.json())
-                else:
-                    st.error(f"API Error: {response.text}")
-            except requests.exceptions.ConnectionError:
-                st.warning("⚠️ Backend not running. Showing mock results for UI demo.")
-                show_churn_results(mock_churn())
-
-
-def show_churn_results(data):
-    if "error" in data:
-        st.error(data["error"])
+    username = st.session_state.get("username", "")
+    if not username:
+        st.error("Authentication Error: Please login to access reports.")
         return
 
-    st.success("✅ Prediction complete!")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Customers", data["total_customers"])
-    col2.metric("Will Churn",      data["predicted_churn"])
-    col3.metric("Churn Rate",      f"{data['churn_rate']}%")
-    st.divider()
+    # Fetch user's cases safely
+    try:
+        res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
+        cases_data = res.json().get("cases", []) if res.status_code == 200 else []
+    except Exception:
+        cases_data = []
 
-    st.subheader("Customer-wise Predictions")
+    # Get completed churn datasets
+    churn_cases = [
+        c for c in cases_data 
+        if c.get("task_type") == "Churn Prediction" and c.get("review_status") == "Completed"
+    ]
+
+    if not churn_cases:
+        st.info(
+            "No completed Churn Prediction datasets found. "
+            "Go to 'Document Ingestion' to upload one."
+        )
+        return
+
+    # Map labels to case IDs
+    case_mapping = {
+        f"{c['filename']} (ID: {c['case_id']})": c['case_id'] for c in churn_cases
+    }
+    
+    selected_case_label = st.selectbox(
+        "Select Dataset", 
+        list(case_mapping.keys()), 
+        key="select_churn_dataset"
+    )
+    
+    if st.button("📊 View Report", use_container_width=True, key="btn_view_churn"):
+        case_id = case_mapping[selected_case_label]
+        with st.spinner("Fetching predictive results..."):
+            try:
+                res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
+                if res.status_code == 200:
+                    st.session_state.churn_results = res.json()
+                else:
+                    st.error(f"Error fetching results: {res.text}")
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+
+    if "churn_results" in st.session_state:
+        show_churn_results(st.session_state.churn_results)
+
+def show_churn_results(data):
+    """
+    Renders metrics and a detailed prediction table for the selected churn dataset.
+    """
+    if "error" in data:
+        st.error(f"Processing Error: {data['error']}")
+        return
+
+    st.success("✅ Prediction Analysis Complete!")
+    
+    # --- Overall Metrics ---
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Customers", data["total_customers"])
+    c2.metric("Predicted Churn", data["predicted_churn"], delta_color="inverse")
+    c3.metric("Projected Churn Rate", f"{data['churn_rate']}%", delta_color="inverse")
+    st.divider()
+    
+    # Export Section
+    st.subheader("📥 Export Prediction Report")
+    df_churn = pd.DataFrame(data["predictions"])
+    col_fmt, col_btn = st.columns([1, 1])
+    with col_fmt:
+        export_fmt = st.selectbox("Select Format", ["CSV", "Excel", "DOCX", "PDF"], key="churn_export_fmt")
+    
+    export_data = export_to_format(df_churn, export_fmt, title="Customer Churn Prediction Report")
+    
+    with col_btn:
+        st.write("") # Padding
+        st.download_button(
+            label=f"⬇️ Download as {export_fmt}",
+            data=export_data,
+            file_name=f"churn_report.{export_fmt.lower()}",
+            mime="application/octet-stream",
+            use_container_width=True,
+        )
+
+    # --- Detailed Data Grid ---
+    st.subheader("Individual Customer Risk Profile")
     df = pd.DataFrame(data["predictions"])
 
-    def color_churn(row):
+    def style_churn_risk(row):
+        """
+        Styles table rows based on churn prediction for high-visibility risk flagging.
+        """
         if row["churn_prediction"] == "Yes":
-            return ["background-color: #ff2c00"] * len(row)
-        return ["background-color: #00de03"] * len(row)
+            # Soft red for risk
+            return ["background-color: rgba(255, 44, 0, 0.15)"] * len(row)
+        # Soft green for retention
+        return ["background-color: rgba(0, 222, 3, 0.10)"] * len(row)
 
-    st.dataframe(df.style.apply(color_churn, axis=1), use_container_width=True)
-
-
-def mock_churn():
-    return {
-        "total_customers": 5,
-        "predicted_churn": 2,
-        "churn_rate": 40.0,
-        "predictions": [
-            {"customer_index": 1, "churn_prediction": "Yes", "churn_probability": 0.82, "risk_level": "High"},
-            {"customer_index": 2, "churn_prediction": "No",  "churn_probability": 0.12, "risk_level": "Low"},
-            {"customer_index": 3, "churn_prediction": "Yes", "churn_probability": 0.76, "risk_level": "High"},
-            {"customer_index": 4, "churn_prediction": "No",  "churn_probability": 0.09, "risk_level": "Low"},
-            {"customer_index": 5, "churn_prediction": "No",  "churn_probability": 0.33, "risk_level": "Medium"},
-        ]
-    }
-
+    st.dataframe(
+        df.style.apply(style_churn_risk, axis=1), 
+        use_container_width=True,
+        hide_index=True
+    )

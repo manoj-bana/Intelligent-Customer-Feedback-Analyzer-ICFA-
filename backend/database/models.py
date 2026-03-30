@@ -1,66 +1,72 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
-from sqlalchemy.orm import declarative_base
 import datetime
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
 class User(Base):
+    """
+    Represents a system user with authentication and password-reset attributes.
+    """
     __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True)
-    password = Column(String)
-
-
-class Feedback(Base):
-    __tablename__ = "feedback"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)  
-    text = Column(String)
-    sentiment = Column(String)
-    created_at = Column(String, default=str(datetime.datetime.utcnow()))
-
-
-class ChurnPrediction(Base):
-    __tablename__ = "churn_predictions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)
-    prediction = Column(String)
-    created_at = Column(String, default=str(datetime.datetime.utcnow()))
-from sqlalchemy import Column, Integer, String, ForeignKey
-from sqlalchemy.orm import declarative_base
-import datetime
- 
-Base = declarative_base()
- 
-class User(Base):
-    __tablename__ = "users"
- 
+    
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True)
     password = Column(String)
     security_question = Column(String, nullable=True)
     security_answer_hash = Column(String, nullable=True)
+    reset_token = Column(String, nullable=True)
+    reset_token_expiry = Column(String, nullable=True)
 
+class Dataset(Base):
+    """
+    Stores metadata for uploaded files (Cases), tracking their source, 
+    processing status, and associated user.
+    """
+    __tablename__ = "datasets"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(String, unique=True, index=True)
+    user_id = Column(Integer)
+    filename = Column(String)
+    file_path = Column(String)
+    source = Column(String, default="web")
+    review_status = Column(String, default="Pending Review")
+    extraction_status = Column(String, default="1 of 1")
+    task_type = Column(String)
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
 
 class Feedback(Base):
+    """
+    Model for individual customer feedback entries and their analyzed sentiment.
+    """
     __tablename__ = "feedback"
- 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)  
-    text = Column(String)
-    sentiment = Column(String)
-    created_at = Column(String, default=str(datetime.datetime.utcnow()))
- 
- 
-class ChurnPrediction(Base):
-    __tablename__ = "churn_predictions"
- 
+    
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer)
+    dataset_id = Column(Integer, nullable=True)
+    text = Column(String)
+    sentiment = Column(String)
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
+
+class ChurnPrediction(Base):
+    """
+    Model for customer churn prediction results.
+    """
+    __tablename__ = "churn_predictions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    dataset_id = Column(Integer, nullable=True)
     prediction = Column(String)
-    created_at = Column(String, default=str(datetime.datetime.utcnow()))
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
