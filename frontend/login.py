@@ -1,8 +1,8 @@
 import streamlit as st
 import requests
- 
+
 API_URL = "http://127.0.0.1:8000"
- 
+
 def show():
     # CSS for uniform inputs + forgot link
     st.markdown("""
@@ -63,7 +63,7 @@ def show():
     col1, col2, col3 = st.columns([1, 4, 1])
     with col2:
         st.markdown(f'<span class="status-badge {status_class}">{status}</span>', unsafe_allow_html=True)
-   
+        
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("### Sign in")
@@ -102,7 +102,7 @@ def show():
                         st.error("❌ Backend offline - use demo: admin/admin123")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
-       
+
         with btn_col2:
             if st.button("Forgot Password?", key="forgot_link", help="Reset password"):
                 st.session_state.show_forgot_password = True
@@ -119,8 +119,7 @@ def show():
                     for k in ['forgot_step','forgot_username','forgot_question','forgot_temp_token']:
                         if k in st.session_state: del st.session_state[k]
                     st.rerun()
-           
-           
+
             if 'forgot_step' not in st.session_state:
                 st.session_state.forgot_step = 0
                 st.session_state.forgot_username = ''
@@ -190,7 +189,3 @@ def show():
                             st.error(resp.json().get("detail", "Reset failed"))
                     else:
                         st.error("Passwords don't match")
-
- 
- 
- 
