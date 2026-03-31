@@ -120,15 +120,14 @@ def predict_churn(df: pd.DataFrame) -> dict:
     
     results = []
     for i, (p, prob) in enumerate(zip(predictions, probs)):
-        res_item = {
+        # Base result with single consistent field name
+        results.append({
+            "customer_id": str(df.iloc[i][id_col]) if id_col else str(i + 1),
             "customer_index": i + 1,
             "churn_prediction": "Yes" if p == 1 else "No",
             "churn_probability": round(float(prob), 3),
             "risk_level": "High" if prob > 0.7 else "Medium" if prob > 0.4 else "Low"
-        }
-        if id_col:
-            res_item[id_col] = str(df.iloc[i][id_col])
-        results.append(res_item)
+        })
         
     churn_count = int(sum(predictions))
     total_count = len(results)

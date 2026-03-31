@@ -286,17 +286,40 @@ def render_cases_fragment(cases_data):
                     except Exception as e:
                         st.error(f"Connection error: {e}")
             else:
-                st.info("Analysis Complete")
+                if st.button("📊 View Reports", width='stretch', key=f"btn_go_report_{selected_case_id}"):
+                    st.query_params["page"] = "📊 Reports"
+                    st.rerun()
                 
         with col_act2:
-            if st.button("🗑️ Delete Dataset", key="btn_delete_case"):
-                try:
-                    del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
-                    if del_res.status_code == 200:
-                        st.success("Dataset successfully deleted.")
+            # Check if this specific case ID is currently in the 'confirmation' state
+            if st.session_state.get('confirm_delete_id') == selected_case_id:
+                st.warning(f"⚠️ Are you sure you want to delete **{selected_case['filename']}**?")
+                cy, cn = st.columns(2)
+                with cy:
+                    if st.button("✅ Yes, Delete", key=f"btn_dy_{selected_case_id}", width='stretch'):
+                        try:
+                            # Perform deletion request
+                            del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
+                            if del_res.status_code == 200:
+                                # Clear confirmation state
+                                st.session_state.confirm_delete_id = None
+                                
+                                # Clear our data cache instantly so the dashboard updates without delay
+                                get_cases.clear()
+                                
+                                st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
+                                st.rerun()
+                            else:
+                                st.error(f"Server error: {del_res.text}")
+                        except Exception as e:
+                            st.error(f"Connection error: {e}")
+                with cn:
+                    if st.button("❌ Cancel", key=f"btn_dn_{selected_case_id}", width='stretch'):
+                        st.session_state.confirm_delete_id = None
                         st.rerun()
-                    else:
-                        st.error(f"Server error: {del_res.text}")
-                except Exception as e:
-                    st.error(f"Connection error: {e}")
+            else:
+                # Initial delete button
+                if st.button("🗑️ Delete Dataset", key=f"btn_del_{selected_case_id}", width='stretch'):
+                    st.session_state.confirm_delete_id = selected_case_id
+                    st.rerun()
 
