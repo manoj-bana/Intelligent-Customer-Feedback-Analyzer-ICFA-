@@ -23,7 +23,7 @@ def _build_bar_chart(sentiment_series_tuple):
 def generate_sentiment_bar_chart(df):
     counts = df['sentiment_label'].str.upper().value_counts()
     fig = _build_bar_chart(tuple(counts.items()))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 @st.cache_data
 def _build_pie_chart(sentiment_series_tuple):
@@ -37,7 +37,7 @@ def _build_pie_chart(sentiment_series_tuple):
 def generate_sentiment_pie_chart(df):
     counts = df['sentiment_label'].str.upper().value_counts()
     fig = _build_pie_chart(tuple(counts.items()))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 @st.cache_data
 def _build_line_chart(trend_data_tuple):
@@ -66,7 +66,7 @@ def generate_sentiment_line_chart(df):
             # Convert to tuple of tuples for caching
             trend_tuple = tuple(trend.itertuples(index=False, name=None))
             fig = _build_line_chart(trend_tuple)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No valid dates found for Sentiment Over Time chart.")
     else:
@@ -87,7 +87,7 @@ def generate_keyword_frequency_chart(freq_data):
         st.info("No keywords available.")
         return
     fig = _build_keyword_chart(tuple(freq_data))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 @st.cache_data
 def _build_wordcloud_image(text_data):
@@ -109,4 +109,4 @@ def generate_wordcloud(text_data):
     # Only pass first 50k chars to avoid hashing huge strings
     img_bytes = _build_wordcloud_image(text_data[:50000])
     st.markdown("##### Word Cloud")
-    st.image(img_bytes, use_container_width=True)
+    st.image(img_bytes, width='stretch')

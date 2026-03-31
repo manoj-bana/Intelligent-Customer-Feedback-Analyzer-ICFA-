@@ -104,7 +104,7 @@ def show():
         list(case_mapping.keys()), 
         key="select_sentiment_dataset"
     )
-    if st.button("📊 View Report", use_container_width=True, key="btn_view_sentiment"):
+    if st.button("📊 View Report", width='stretch', key="btn_view_sentiment"):
         # Clear previous search when viewing a new report
         if "feedback_search_query" in st.session_state:
             st.session_state.feedback_search_query = ""
@@ -171,7 +171,7 @@ def show_results(data, results_df, df_enriched, agg_df):
                 data=export_data,
                 file_name=f"feedback_report.{export_fmt.lower()}",
                 mime="application/octet-stream",
-                use_container_width=True,
+                width='stretch',
             )
         st.divider()
 
@@ -240,12 +240,12 @@ def render_user_aggregation_fragment_v2(agg_df_all):
             
         ua1, ua2, ua3 = st.columns([1, 2, 1])
         with ua1:
-            if st.button("⬅️ Prev", disabled=st.session_state.user_agg_page <= 1, key="ua_prev", use_container_width=True):
+            if st.button("⬅️ Prev", disabled=st.session_state.user_agg_page <= 1, key="ua_prev", width='stretch'):
                 st.session_state.user_agg_page -= 1
                 try: st.rerun(scope="fragment")
                 except: st.rerun()
         with ua3:
-            if st.button("Next ➡️", disabled=st.session_state.user_agg_page >= total_pages, key="ua_next", use_container_width=True):
+            if st.button("Next ➡️", disabled=st.session_state.user_agg_page >= total_pages, key="ua_next", width='stretch'):
                 st.session_state.user_agg_page += 1
                 try: st.rerun(scope="fragment")
                 except: st.rerun()
@@ -256,7 +256,7 @@ def render_user_aggregation_fragment_v2(agg_df_all):
             st.markdown(f"<p style='text-align:center;'>Page <b>{st.session_state.user_agg_page}</b> of <b>{total_pages}</b></p>", unsafe_allow_html=True)
                 
         df_page = agg_df.iloc[start_idx:end_idx]
-        st.dataframe(df_page, use_container_width=True, hide_index=True)
+        st.dataframe(df_page, width='stretch', hide_index=True)
     else:
         st.warning("⚠️ No records found.")
     st.divider()
@@ -373,7 +373,7 @@ def render_keyword_tabs(data):
         freq_kw = data.get("freq_keywords") or data.get("keywords", [])
         if freq_kw:
             freq_df = pd.DataFrame(freq_kw)[["word", "count"]]
-            st.dataframe(freq_df, use_container_width=True, hide_index=True)
+            st.dataframe(freq_df, width='stretch', hide_index=True)
         else:
             st.info("Frequency data unavailable.")
 
@@ -382,7 +382,7 @@ def render_keyword_tabs(data):
         tfidf_kw = data.get("tfidf_keywords", [])
         if tfidf_kw:
             tfidf_df = pd.DataFrame(tfidf_kw)[["word", "score"]]
-            st.dataframe(tfidf_df, use_container_width=True, hide_index=True)
+            st.dataframe(tfidf_df, width='stretch', hide_index=True)
         else:
             st.info("TF-IDF data unavailable.")
 
@@ -470,12 +470,12 @@ def render_results_table_v2(results_df):
 
         p1, p2, p3 = st.columns([1, 2, 1])
         with p1:
-            if st.button("⬅️ Previous", disabled=st.session_state.feedback_page_num <= 1, key="fb_prev", use_container_width=True):
+            if st.button("⬅️ Previous", disabled=st.session_state.feedback_page_num <= 1, key="fb_prev", width='stretch'):
                 st.session_state.feedback_page_num -= 1
                 try: st.rerun(scope="fragment")
                 except: st.rerun()
         with p3:
-            if st.button("Next ➡️", disabled=st.session_state.feedback_page_num >= total_pages, key="fb_next", use_container_width=True):
+            if st.button("Next ➡️", disabled=st.session_state.feedback_page_num >= total_pages, key="fb_next", width='stretch'):
                 st.session_state.feedback_page_num += 1
                 try: st.rerun(scope="fragment")
                 except: st.rerun()
@@ -487,6 +487,6 @@ def render_results_table_v2(results_df):
 
         display_cols = [c for c in res_df_display.columns if c not in ['_search_id', '_search_all']]
         df_page = res_df_display.iloc[start_idx:end_idx]
-        st.dataframe(df_page[display_cols], use_container_width=True, hide_index=True)
+        st.dataframe(df_page[display_cols], width='stretch', hide_index=True)
     
     _results_fragment()

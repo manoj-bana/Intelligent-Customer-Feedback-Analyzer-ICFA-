@@ -24,7 +24,7 @@ def show():
             ["Sentiment Analysis", "Churn Prediction"]
         )
         
-        if st.button("🚀 Upload & Process", use_container_width=True, type="primary"):
+        if st.button("🚀 Upload & Process", width='stretch', type="primary"):
             if not uploaded_file:
                 st.error("Please upload a file first.")
             else:

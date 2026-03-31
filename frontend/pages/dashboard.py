@@ -203,7 +203,7 @@ def render_cases_fragment(cases_data):
     
     # Check for interactions before slicing
     with pg_col1:
-        if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, use_container_width=True):
+        if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, width='stretch'):
             st.session_state.current_page -= 1
             try: st.rerun(scope="fragment")
             except: st.rerun()
@@ -213,7 +213,7 @@ def render_cases_fragment(cases_data):
         pass
         
     with pg_col3:
-        if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, use_container_width=True):
+        if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, width='stretch'):
             st.session_state.current_page += 1
             try: st.rerun(scope="fragment")
             except: st.rerun()
@@ -252,7 +252,7 @@ def render_cases_fragment(cases_data):
 
     st.dataframe(
         df_page,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 
@@ -275,7 +275,7 @@ def render_cases_fragment(cases_data):
         with col_act1:
             # Only show Retry button for stalled/error cases
             if "Completed" not in selected_case["review_status"]:
-                if st.button("🔄 Retry", use_container_width=True, key="btn_retry_case"):
+                if st.button("🔄 Retry", width='stretch', key="btn_retry_case"):
                     try:
                         retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", timeout=5)
                         if retry_res.status_code == 200:

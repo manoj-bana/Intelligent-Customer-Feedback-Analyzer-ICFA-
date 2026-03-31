@@ -60,7 +60,7 @@ def show():
         key="select_churn_dataset"
     )
     
-    if st.button("📊 View Report", use_container_width=True, key="btn_view_churn"):
+    if st.button("📊 View Report", width='stretch', key="btn_view_churn"):
         # Clear previous search when viewing a new report
         if "churn_user_search" in st.session_state:
             st.session_state.churn_user_search = ""
@@ -72,12 +72,12 @@ def show():
                 if res.status_code == 200:
                     results_data = res.json()
                     st.session_state.churn_results = results_data
-                    # One-time processing
-                    st.session_state.processed_churn_df = pd.DataFrame(results_data.get("predictions", []))
+                    # One-time processing with search index
+                    st.session_state.processed_churn_df = get_processed_churn_results(results_data.get("predictions", []))
                 else:
                     st.error(f"Error fetching results: {res.text}")
             except Exception as e:
-                st.error(f"Connection error: {e}")
+                st.error(f"Processing error: {e}")
 
     if "churn_results" in st.session_state:
         show_churn_results(
@@ -104,6 +104,22 @@ def show_churn_results(data, df):
     
     # Export Section
     st.subheader("📥 Export Prediction Report")
+    col_fmt, col_btn = st.columns([1, 1])
+    with col_fmt:
+        export_fmt = st.selectbox("Select Format", ["CSV", "Excel", "DOCX", "PDF"], key="churn_export_fmt")
+    
+    export_data = export_to_format(df, export_fmt, title="Customer Churn Prediction Report")
+    
+    with col_btn:
+        st.write("") # Padding
+        st.download_button(
+            label=f"⬇️ Download as {export_fmt}",
+            data=export_data,
+            file_name=f"churn_report.{export_fmt.lower()}",
+            mime="application/octet-stream",
+            width='stretch',
+        )
+
     # --- Search and Table as a Fragment (only this re-renders on search/clear) ---
     @st.fragment
     def render_churn_table_v2():
@@ -124,7 +140,7 @@ def show_churn_results(data, df):
                     st.session_state.clear_churn = True
                     st.rerun(scope="fragment")
 
-        df_display = df_full.copy()
+        df_display = df.copy()
         
         # Apply Filtering (Fast Local)
         if search_query_raw:
@@ -156,12 +172,12 @@ def show_churn_results(data, df):
         # Pagination Controls
         cp1, cp2, cp3 = st.columns([1, 2, 1])
         with cp1:
-            if st.button("⬅️ Previous", disabled=st.session_state.churn_page_num <= 1, key="cp_prev", use_container_width=True):
+            if st.button("⬅️ Previous", disabled=st.session_state.churn_page_num <= 1, key="cp_prev", width='stretch'):
                 st.session_state.churn_page_num -= 1
                 try: st.rerun(scope="fragment")
                 except: st.rerun()
         with cp3:
-            if st.button("Next ➡️", disabled=st.session_state.churn_page_num >= total_pages, key="cp_next", use_container_width=True):
+            if st.button("Next ➡️", disabled=st.session_state.churn_page_num >= total_pages, key="cp_next", width='stretch'):
                 st.session_state.churn_page_num += 1
                 try: st.rerun(scope="fragment")
                 except: st.rerun()
@@ -186,7 +202,7 @@ def show_churn_results(data, df):
         df_page = df_display.iloc[start_idx:end_idx]
         st.dataframe(
             df_page.style.apply(style_churn_risk, axis=1), 
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
     
