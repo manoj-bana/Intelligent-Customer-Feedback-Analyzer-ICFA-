@@ -1,8 +1,28 @@
 import re
 from collections import Counter
 
-# Global cache for lazy loading heavy ML/NLTK resources
+# Global cache for lazy loading heavy resources
 _resources = {"sia": None, "stop_words": None}
+
+# Common English stop words (no NLTK download required)
+_ENGLISH_STOP_WORDS = {
+    "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your",
+    "yours", "yourself", "yourselves", "he", "him", "his", "himself", "she",
+    "her", "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an",
+    "the", "and", "but", "if", "or", "because", "as", "until", "while", "of",
+    "at", "by", "for", "with", "about", "against", "between", "into", "through",
+    "during", "before", "after", "above", "below", "to", "from", "up", "down",
+    "in", "out", "on", "off", "over", "under", "again", "further", "then",
+    "once", "here", "there", "when", "where", "why", "how", "all", "both",
+    "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not",
+    "only", "own", "same", "so", "than", "too", "very", "s", "t", "just",
+    "don", "should", "now", "d", "ll", "m", "o", "re", "ve", "y", "ain",
+    "aren", "couldn", "didn", "doesn", "hadn", "hasn", "haven", "isn", "ma",
+    "mightn", "mustn", "needn", "shan", "shouldn", "wasn", "weren", "won", "wouldn",
+}
 
 # Domain-specific stop words to exclude from keyword extraction
 STOP_WORDS = {
@@ -22,19 +42,13 @@ STOP_WORDS = {
 
 def _get_resources():
     """
-    Lazy loader for NLTK and sentiment analysis resources.
-    Ensures resources are only downloaded and initialized once.
+    Lazy loader for sentiment analysis resources.
+    Uses vaderSentiment (standalone package, no NLTK downloads needed).
     """
     if _resources["sia"] is None:
-        import nltk
-        from nltk.corpus import stopwords
-        from nltk.sentiment import SentimentIntensityAnalyzer
-        
-        nltk.download("stopwords", quiet=True)
-        nltk.download("vader_lexicon", quiet=True)
-        
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
         _resources["sia"] = SentimentIntensityAnalyzer()
-        _resources["stop_words"] = set(stopwords.words("english")) | STOP_WORDS
+        _resources["stop_words"] = _ENGLISH_STOP_WORDS | STOP_WORDS
     return _resources["sia"], _resources["stop_words"]
 
 def _clean_text_for_keywords(text: str) -> str:

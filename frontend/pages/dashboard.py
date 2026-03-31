@@ -170,46 +170,42 @@ def show_home():
 
     st.divider()
     
-    # --- Stalled Case Management ---
-    pending_cases = [
-        c for c in cases_data 
-        if "Pending Review" in c["review_status"] or "Error" in c["review_status"]
-    ]
-    
-    if pending_cases:
-        st.subheader("🛠️ Manage Stalled Cases")
-        st.markdown("Resume or remove datasets that may have been interrupted by service restarts.")
+    # --- Dataset Management ---
+    if cases_data:
+        st.subheader("🗑️ Manage & Delete Datasets")
+        st.markdown("Select a dataset below to delete it from the system or retry stalled processing.")
         
-        case_lookup = {c['case_id']: c for c in pending_cases}
-        case_mapping = {f"{c['filename']} (ID: {c['case_id']})": c['case_id'] for c in pending_cases}
-        selected_case_label = st.selectbox("Select Case to Manage", list(case_mapping.keys()))
-
+        # All cases are now manageable
+        case_lookup = {c['case_id']: c for c in cases_data}
+        case_mapping = {f"{c['filename']} (ID: {c['case_id']}, Status: {c['review_status']})": c['case_id'] for c in cases_data}
+        
+        selected_case_label = st.selectbox("Select Dataset to Manage", list(case_mapping.keys()), key="manage_case_selector")
         selected_case_id = case_mapping[selected_case_label]
-        selected_status = case_lookup[selected_case_id]["review_status"]
+        selected_case = case_lookup[selected_case_id]
         
-        if "Error" in selected_status:
-            st.error(f"**Reason for failure:** {selected_status}")
-        else:
-            st.warning(f"**Status:** {selected_status} — Processing may have stalled.")
-
         col_act1, col_act2 = st.columns([1, 4])
         with col_act1:
-            if st.button("🔄 Retry Processing", use_container_width=True):
-                try:
-                    retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", timeout=5)
-                    if retry_res.status_code == 200:
-                        st.success("Task added back to queue!")
-                        st.rerun()
-                    else:
-                        st.error(f"Server error: {retry_res.text}")
-                except Exception as e:
-                    st.error(f"Connection error: {e}")
+            # Only show Retry button for stalled/error cases
+            if "Completed" not in selected_case["review_status"]:
+                if st.button("🔄 Retry", use_container_width=True, key="btn_retry_case"):
+                    try:
+                        retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", timeout=5)
+                        if retry_res.status_code == 200:
+                            st.success("Task added back to queue!")
+                            st.rerun()
+                        else:
+                            st.error(f"Server error: {retry_res.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            else:
+                st.info("Analysis Complete")
+                
         with col_act2:
-            if st.button("🗑️ Delete Case"):
+            if st.button("🗑️ Delete Dataset", key="btn_delete_case"):
                 try:
                     del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
                     if del_res.status_code == 200:
-                        st.success("Case successfully deleted.")
+                        st.success("Dataset successfully deleted.")
                         st.rerun()
                     else:
                         st.error(f"Server error: {del_res.text}")
