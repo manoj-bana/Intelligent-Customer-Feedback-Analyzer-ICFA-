@@ -218,7 +218,7 @@ def show_results(data):
             if agg_df is not None and not agg_df.empty:
                 st.dataframe(agg_df, use_container_width=True, hide_index=True)
             else:
-                st.info("Insufficient data or no users found matching search criteria.")
+                st.warning("⚠️ No records found.")
         
         render_user_aggregation()
 
