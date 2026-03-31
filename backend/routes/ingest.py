@@ -28,7 +28,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             
         out_results = {}
         if task_type == "Sentiment Analysis":
-            CHUNK_SIZE, MAX_ROWS = 5000, 100_000
+            CHUNK_SIZE, MAX_ROWS = 5000, 500_000
             text_col = None
             total = positive = negative = neutral = 0
             results_preview, review_texts_preview, enriched_chunks = [], [], []
@@ -46,9 +46,12 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     if not text_col:
                         text_col = chunk_df.select_dtypes(include="object").columns[0]
                 
+                # Identify user ID column to preserve
+                user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
+                
                 chunk_reviews = chunk_df[text_col].fillna("").tolist()
                 chunk_labels, chunk_scores = [], []
-                for review in chunk_reviews:
+                for idx, review in enumerate(chunk_reviews):
                     sentiment = analyze_sentiment(str(review))
                     chunk_labels.append(sentiment["label"])
                     chunk_scores.append(sentiment["score"])
@@ -60,9 +63,11 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     else:
                         neutral += 1
                         
-                    if len(results_preview) < 10000:
-                        results_preview.append({"review": str(review), **sentiment})
-                        review_texts_preview.append(str(review))
+                    results_item = {"review": str(review), **sentiment}
+                    if user_id_col:
+                        results_item[user_id_col] = str(chunk_df.iloc[idx][user_id_col])
+                    results_preview.append(results_item)
+                    review_texts_preview.append(str(review))
                         
                 chunk_df["SentimentLabel"], chunk_df["SentimentScore"] = chunk_labels, chunk_scores
                 enriched_chunks.append(chunk_df)
@@ -107,8 +112,9 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 "total_customers": total_customers, 
                 "predicted_churn": predicted_churn_total,
                 "churn_rate": round(predicted_churn_total / total_customers * 100, 2) if total_customers > 0 else 0.0,
-                "predictions": all_predictions[:1000]
+                "predictions": all_predictions
             }
+
             
         results_path = f"{file_path}_results.json"
         with open(results_path, "w") as f:

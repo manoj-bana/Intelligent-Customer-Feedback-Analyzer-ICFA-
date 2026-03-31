@@ -18,6 +18,48 @@ from frontend.utils.export_utils import export_to_format
 
 API_URL = "http://127.0.0.1:8000"
 
+@st.cache_data
+def get_cached_aggregation(df):
+    """Caches the expensive user-level data aggregation."""
+    agg = aggregate_user_data(df)
+    if agg is not None:
+         id_cols = [c for c in agg.columns if any(k in c.lower() for k in ["userid", "user id", "customerid", "customer id", "user", "id"])]
+         if id_cols:
+              agg['_search_id'] = agg[id_cols[0]].astype(str).str.lower()
+    return agg
+
+@st.cache_data
+def get_processed_results(data_results):
+    """Caches results dataframe and pre-calculates a universal search index."""
+    df = pd.DataFrame(data_results)
+    if 'label' in df.columns:
+         df.rename(columns={'label': 'sentiment_label'}, inplace=True)
+    if 'review' in df.columns:
+         df.rename(columns={'review': 'feedback_text'}, inplace=True)
+    
+    # Identify the ID column — match the same patterns as the backend
+    # Exclude known non-ID columns to avoid false matches
+    exclude_cols = {'score', 'sentiment_label', 'feedback_text', '_search_id', '_search_all'}
+    id_cols = [c for c in df.columns if c not in exclude_cols and 
+               any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])]
+    if id_cols:
+        df['_search_id'] = df[id_cols[0]].astype(str).str.strip().str.lower()
+    return df
+
+@st.cache_data
+def get_processed_enriched(csv_b64):
+    """Caches enriched CSV parsing."""
+    if not csv_b64: return None
+    try:
+        csv_bytes = base64.b64decode(csv_b64)
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+        # Ensure searching works on enriched as well
+        id_cols = [c for c in df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])]
+        if id_cols:
+            df['_search_id'] = df[id_cols[0]].astype(str).str.lower()
+        return normalize_dataframe_columns(df)
+    except Exception: return None
+
 def show():
     """
     Main entry point for the Sentiment Analysis report page. 
@@ -63,6 +105,10 @@ def show():
         key="select_sentiment_dataset"
     )
     if st.button("📊 View Report", use_container_width=True, key="btn_view_sentiment"):
+        # Clear previous search when viewing a new report
+        if "feedback_search_query" in st.session_state:
+            st.session_state.feedback_search_query = ""
+            
         case_id = case_mapping[selected_case_label]
         with st.spinner("Fetching analysis results..."):
             try:
@@ -90,21 +136,16 @@ def show_results(data):
     m3.metric("Neutral Reviews", data["neutral"])
     st.divider()
 
-    # --- Data Preparation ---
-    results_df = pd.DataFrame(data["results"])
-    if 'label' in results_df.columns:
-        results_df.rename(columns={'label': 'sentiment_label'}, inplace=True)
-    if 'review' in results_df.columns:
-        results_df.rename(columns={'review': 'feedback_text'}, inplace=True)
+    # --- Move Global Search Bar logic back into local sections later ---
 
-    df_enriched = None
-    if "enriched_csv" in data and data["enriched_csv"]:
-        try:
-            csv_bytes = base64.b64decode(data["enriched_csv"])
-            df_enriched = pd.read_csv(io.BytesIO(csv_bytes))
-            df_enriched = normalize_dataframe_columns(df_enriched)
-        except Exception as e:
-            st.error(f"Error parsing enriched dataset: {e}")
+    # --- Data Preparation (Cached) ---
+    results_df = get_processed_results(data["results"])
+    df_enriched = get_processed_enriched(data.get("enriched_csv"))
+
+
+
+
+
 
     # Export Section
     if df_enriched is not None or not results_df.empty:
@@ -135,17 +176,54 @@ def show_results(data):
     # --- Visualizations Pipeline ---
     render_visualizations(data, df_to_plot)
     
-    st.divider()
-
     # --- User-Level Aggregation ---
     if df_enriched is not None:
-        st.subheader("👤 Per-User Analysis")
-        agg_df = aggregate_user_data(df_enriched)
-        if agg_df is not None and not agg_df.empty:
-            st.dataframe(agg_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("Insufficient data for user-level aggregation.")
+        # Cached aggregation is critical for speed on large datasets
+        agg_df_all = get_cached_aggregation(df_enriched)
+        
+        @st.fragment
+        def render_user_aggregation():
+            st.subheader("👤 Per-User Analysis")
+            
+            # Move CLEAR logic ABOVE the widget instantiation
+            if st.session_state.get("clear_agg"):
+                st.session_state.agg_q_in = ""
+                st.session_state.clear_agg = False
+                
+            with st.form("agg_search_form"):
+                c_in, c_search, c_clear = st.columns([3, 1, 1])
+                with c_in:
+                    agg_query = st.text_input("Search ID", key="agg_q_in", label_visibility="collapsed", placeholder="Enter ID...")
+                with c_search:
+                    st.form_submit_button("Search")
+                with c_clear:
+                    if st.form_submit_button("Clear"):
+                        st.session_state.clear_agg = True
+                        st.rerun(scope="fragment")
+
+            agg_df = agg_df_all.copy() if agg_df_all is not None else None
+            
+            # Fast local filtering
+            if agg_query and agg_df is not None:
+                if '_search_id' in agg_df.columns:
+                     agg_df = agg_df[agg_df['_search_id'].str.startswith(agg_query.strip().lower())]
+                else:
+                    id_cols = [c for c in agg_df.columns if any(k in c.lower() for k in ["userid", "user id", "customerid", "customer id", "user", "id"])]
+                    if id_cols:
+                        agg_df = agg_df[agg_df[id_cols[0]].astype(str).str.lower().str.startswith(agg_query.strip().lower())]
+            elif agg_df is not None:
+                st.caption("Showing preview of first 1,000 users. Use 'Search ID' to find specific customers.")
+                agg_df = agg_df.head(1000)
+
+            if agg_df is not None and not agg_df.empty:
+                st.dataframe(agg_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Insufficient data or no users found matching search criteria.")
+        
+        render_user_aggregation()
+
         st.divider()
+
 
     # --- Keyword Discovery ---
     render_keyword_tabs(data)
@@ -153,7 +231,8 @@ def show_results(data):
     st.divider()
 
     # --- Detailed Results Table ---
-    render_results_table(data)
+    render_results_table(data, results_df)
+
 
 def normalize_dataframe_columns(df):
     """
@@ -271,33 +350,92 @@ def render_keyword_tabs(data):
         else:
             st.info("TF-IDF data unavailable.")
 
-def render_results_table(data):
+def render_results_table(data, results_df):
     """
-    Renders the fully searchable and sortable results table.
+    Renders the fully searchable and sortable results table as a fragment.
+    Only this section re-renders on search/clear, not the entire page.
     """
-    st.subheader("📋 Raw Data Review")
+    @st.fragment
+    def _results_fragment():
+        st.subheader("📋 Raw Data Review")
+        
+        if st.session_state.get("clear_res"):
+            st.session_state.res_q_in = ""
+            st.session_state.clear_res = False
 
-    col1, col2 = st.columns(2)
-    with col1:
-        sentiment_filter = st.selectbox(
-            "Filter by Sentiment",
-            ["All", "Positive", "Negative", "Neutral"],
-            key="sentiment_filter"
-        )
-    with col2:
-        sort_order = st.selectbox(
-            "Sort by Score",
-            ["Descending (High to Low)", "Ascending (Low to High)"],
-            key="sort_order"
-        )
+        with st.form("results_search_form"):
+            c_in, c_search, c_clear = st.columns([3, 1, 1])
+            with c_in:
+                res_query = st.text_input("Search ID", key="res_q_in", label_visibility="collapsed", placeholder="Enter ID...")
+            with c_search:
+                st.form_submit_button("Search")
+            with c_clear:
+                if st.form_submit_button("Clear"):
+                    st.session_state.clear_res = True
+                    st.rerun(scope="fragment")
 
-    res_df_display = pd.DataFrame(data["results"])
+        col1, col2 = st.columns(2)
+        with col1:
+            sentiment_filter = st.selectbox(
+                "Filter by Sentiment",
+                ["All", "Positive", "Negative", "Neutral"],
+                key="sentiment_filter"
+            )
+        with col2:
+            sort_order = st.selectbox(
+                "Sort by Score",
+                ["Descending (High to Low)", "Ascending (Low to High)"],
+                key="sort_order"
+            )
 
-    if sentiment_filter != "All":
-        res_df_display = res_df_display[res_df_display["label"] == sentiment_filter.upper()]
+        res_df_display = results_df.copy()
 
-    if 'score' in res_df_display.columns:
-        ascending = (sort_order == "Ascending (Low to High)")
-        res_df_display = res_df_display.sort_values("score", ascending=ascending)
+        # Apply fast local filtering
+        if res_query:
+            query_lower = res_query.strip().lower()
+            
+            # Find the ID column directly (not from cache)
+            exclude = {'score', 'sentiment_label', 'feedback_text', '_search_id', '_search_all'}
+            id_col = None
+            for c in res_df_display.columns:
+                if c in exclude:
+                    continue
+                cl = c.lower()
+                if any(k in cl for k in ["userid", "user_id", "customerid", "customer_id", "customer id", "id"]):
+                    id_col = c
+                    break
+            
+            if id_col:
+                # Exact match on ID column — "540" finds ONLY Id=540
+                res_df_display = res_df_display[
+                    res_df_display[id_col].astype(str).str.strip().str.lower() == query_lower
+                ]
+            else:
+                # No ID column found — search all text columns
+                str_cols = [c for c in res_df_display.columns if c not in exclude]
+                mask = pd.Series(False, index=res_df_display.index)
+                for col in str_cols:
+                    mask |= res_df_display[col].astype(str).str.lower().str.contains(query_lower, na=False, regex=False)
+                res_df_display = res_df_display[mask]
+        else:
+            st.caption("Showing preview of first 1,000 records. Use 'Search ID' to find specific records.")
+            res_df_display = res_df_display.head(1000)
 
-    st.dataframe(res_df_display, use_container_width=True, hide_index=True)
+        # Use the correct renamed column for sentiment filtering
+        sentiment_col = 'sentiment_label' if 'sentiment_label' in res_df_display.columns else 'label'
+        if sentiment_filter != "All" and sentiment_col in res_df_display.columns:
+            res_df_display = res_df_display[res_df_display[sentiment_col] == sentiment_filter.upper()]
+
+        if 'score' in res_df_display.columns:
+            ascending = (sort_order == "Ascending (Low to High)")
+            res_df_display = res_df_display.sort_values("score", ascending=ascending)
+
+        # Hide internal search columns from display
+        display_cols = [c for c in res_df_display.columns if c not in ['_search_id', '_search_all']]
+
+        if res_df_display.empty and res_query:
+            st.warning("⚠️ No records found.")
+        else:
+            st.dataframe(res_df_display[display_cols], use_container_width=True, hide_index=True)
+    
+    _results_fragment()
