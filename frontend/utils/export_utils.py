@@ -1,8 +1,10 @@
+import streamlit as st
 from fpdf import FPDF
 import io
 import pandas as pd
 from docx import Document
 
+@st.cache_data(show_spinner=False)
 def export_to_format(df: pd.DataFrame, file_format: str, title: str = "Analysis Report"):
     """
     Unified export function supporting CSV, Excel, DOCX, and PDF.

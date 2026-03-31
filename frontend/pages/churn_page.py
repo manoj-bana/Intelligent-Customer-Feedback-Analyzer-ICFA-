@@ -52,22 +52,28 @@ def show():
     
     if st.button("📊 View Report", use_container_width=True, key="btn_view_churn"):
         case_id = case_mapping[selected_case_label]
-        with st.spinner("Fetching predictive results..."):
+        with st.spinner("Preparing predictive report..."):
             try:
                 res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
                 if res.status_code == 200:
-                    st.session_state.churn_results = res.json()
+                    results_data = res.json()
+                    st.session_state.churn_results = results_data
+                    # One-time processing
+                    st.session_state.processed_churn_df = pd.DataFrame(results_data.get("predictions", []))
                 else:
                     st.error(f"Error fetching results: {res.text}")
             except Exception as e:
                 st.error(f"Connection error: {e}")
 
     if "churn_results" in st.session_state:
-        show_churn_results(st.session_state.churn_results)
+        show_churn_results(
+            st.session_state.churn_results,
+            st.session_state.get("processed_churn_df")
+        )
 
-def show_churn_results(data):
+def show_churn_results(data, df):
     """
-    Renders metrics and a detailed prediction table for the selected churn dataset.
+    Renders metrics and a detailed prediction table using optimized dataframes.
     """
     if "error" in data:
         st.error(f"Processing Error: {data['error']}")
@@ -84,7 +90,7 @@ def show_churn_results(data):
     
     # Export Section
     st.subheader("📥 Export Prediction Report")
-    df_churn = pd.DataFrame(data["predictions"])
+    df_churn = df
     col_fmt, col_btn = st.columns([1, 1])
     with col_fmt:
         export_fmt = st.selectbox("Select Format", ["CSV", "Excel", "DOCX", "PDF"], key="churn_export_fmt")
@@ -101,22 +107,70 @@ def show_churn_results(data):
             use_container_width=True,
         )
 
+    st.divider()
+
     # --- Detailed Data Grid ---
+    render_churn_table_fragment(df)
+
+@st.fragment
+def render_churn_table_fragment(df):
+    """
+    Renders the churn prediction list in an isolated fragment for high-speed pagination.
+    Only this block reruns when navigating between pages.
+    """
     st.subheader("Individual Customer Risk Profile")
-    df = pd.DataFrame(data["predictions"])
+
+    # --- Pagination Logic ---
+    items_per_page = 10
+    total_items = len(df)
+    total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+
+    if "churn_page_num" not in st.session_state:
+        st.session_state.churn_page_num = 1
+
+    # Clamp page number
+    if st.session_state.churn_page_num > total_pages:
+        st.session_state.churn_page_num = total_pages
+    if st.session_state.churn_page_num < 1:
+        st.session_state.churn_page_num = 1
+
+    # Pagination Controls (Top)
+    cp1, cp2, cp3 = st.columns([1, 2, 1])
+    with cp1:
+        if st.button("⬅️ Previous", disabled=st.session_state.churn_page_num <= 1, key="cp_prev", use_container_width=True):
+            st.session_state.churn_page_num -= 1
+            try: st.rerun(scope="fragment")
+            except: st.rerun()
+    with cp2:
+        pass # Placeholder
+    with cp3:
+        if st.button("Next ➡️", disabled=st.session_state.churn_page_num >= total_pages, key="cp_next", use_container_width=True):
+            st.session_state.churn_page_num += 1
+            try: st.rerun(scope="fragment")
+            except: st.rerun()
+
+    start_idx = (st.session_state.churn_page_num - 1) * items_per_page
+    end_idx = start_idx + items_per_page
+
+    with cp2:
+        st.markdown(
+            f"<div style='text-align: center; padding-top: 5px;'>"
+            f"Page <b>{st.session_state.churn_page_num}</b> of <b>{total_pages}</b>"
+            f"<br><small>{total_items} customers total</small></div>", 
+            unsafe_allow_html=True
+        )
 
     def style_churn_risk(row):
         """
         Styles table rows based on churn prediction for high-visibility risk flagging.
         """
         if row["churn_prediction"] == "Yes":
-            # Soft red for risk
             return ["background-color: rgba(255, 44, 0, 0.15)"] * len(row)
-        # Soft green for retention
         return ["background-color: rgba(0, 222, 3, 0.10)"] * len(row)
 
+    df_page = df.iloc[start_idx:end_idx]
     st.dataframe(
-        df.style.apply(style_churn_risk, axis=1), 
+        df_page.style.apply(style_churn_risk, axis=1), 
         use_container_width=True,
         hide_index=True
     )

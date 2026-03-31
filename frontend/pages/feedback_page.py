@@ -64,22 +64,52 @@ def show():
     )
     if st.button("📊 View Report", use_container_width=True, key="btn_view_sentiment"):
         case_id = case_mapping[selected_case_label]
-        with st.spinner("Fetching analysis results..."):
+        with st.spinner("Preparing high-performance report data..."):
             try:
                 res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
                 if res.status_code == 200:
-                    st.session_state.analysis_results = res.json()
+                    results_data = res.json()
+                    st.session_state.analysis_results = results_data
+                    
+                    # --- One-time Pre-processing for speed ---
+                    # 1. Main detailed results
+                    results_df = pd.DataFrame(results_data.get("results", []))
+                    if 'label' in results_df.columns:
+                        results_df.rename(columns={'label': 'sentiment_label'}, inplace=True)
+                    if 'review' in results_df.columns:
+                        results_df.rename(columns={'review': 'feedback_text'}, inplace=True)
+                    st.session_state.processed_results_df = results_df
+                    
+                    # 2. Enriched CSV decoding
+                    df_enriched = None
+                    if "enriched_csv" in results_data and results_data["enriched_csv"]:
+                        csv_bytes = base64.b64decode(results_data["enriched_csv"])
+                        df_enriched = pd.read_csv(io.BytesIO(csv_bytes))
+                        df_enriched = normalize_dataframe_columns(df_enriched)
+                    st.session_state.processed_enriched_df = df_enriched
+                    
+                    # 3. User Aggregation
+                    if df_enriched is not None:
+                        st.session_state.processed_agg_df = aggregate_user_data(df_enriched)
+                    else:
+                        st.session_state.processed_agg_df = None
+                        
                 else:
                     st.error(f"Error fetching results: {res.text}")
             except Exception as e:
-                st.error(f"Connection error: {e}")
+                st.error(f"Processing error: {e}")
 
     if "analysis_results" in st.session_state:
-        show_results(st.session_state.analysis_results)
+        show_results(
+            st.session_state.analysis_results,
+            st.session_state.get("processed_results_df"),
+            st.session_state.get("processed_enriched_df"),
+            st.session_state.get("processed_agg_df")
+        )
 
-def show_results(data):
+def show_results(data, results_df, df_enriched, agg_df):
     """
-    Renders the analysis results, including metric cards, charts, and detailed keyword data.
+    Renders optimized reports using pre-processed dataframes.
     """
     st.success(f"✅ Analyzed {data['total']} reviews!")
 
@@ -90,24 +120,8 @@ def show_results(data):
     m3.metric("Neutral Reviews", data["neutral"])
     st.divider()
 
-    # --- Data Preparation ---
-    results_df = pd.DataFrame(data["results"])
-    if 'label' in results_df.columns:
-        results_df.rename(columns={'label': 'sentiment_label'}, inplace=True)
-    if 'review' in results_df.columns:
-        results_df.rename(columns={'review': 'feedback_text'}, inplace=True)
-
-    df_enriched = None
-    if "enriched_csv" in data and data["enriched_csv"]:
-        try:
-            csv_bytes = base64.b64decode(data["enriched_csv"])
-            df_enriched = pd.read_csv(io.BytesIO(csv_bytes))
-            df_enriched = normalize_dataframe_columns(df_enriched)
-        except Exception as e:
-            st.error(f"Error parsing enriched dataset: {e}")
-
     # Export Section
-    if df_enriched is not None or not results_df.empty:
+    if df_enriched is not None or (results_df is not None and not results_df.empty):
         st.subheader("📥 Export Analysis Report")
         col_fmt, col_btn = st.columns([1, 1])
         with col_fmt:
@@ -128,24 +142,17 @@ def show_results(data):
         st.divider()
 
     df_to_plot = df_enriched if df_enriched is not None and not df_enriched.empty else results_df
-
-    if 'sentiment_label' not in df_to_plot.columns:
+    if df_to_plot is not None and 'sentiment_label' not in df_to_plot.columns:
         df_to_plot['sentiment_label'] = df_to_plot.get('label', 'UNKNOWN')
 
     # --- Visualizations Pipeline ---
-    render_visualizations(data, df_to_plot)
+    render_visualizations_fragment(data, df_to_plot)
     
     st.divider()
 
     # --- User-Level Aggregation ---
     if df_enriched is not None:
-        st.subheader("👤 Per-User Analysis")
-        agg_df = aggregate_user_data(df_enriched)
-        if agg_df is not None and not agg_df.empty:
-            st.dataframe(agg_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("Insufficient data for user-level aggregation.")
-        st.divider()
+        render_user_aggregation_fragment(agg_df)
 
     # --- Keyword Discovery ---
     render_keyword_tabs(data)
@@ -153,7 +160,60 @@ def show_results(data):
     st.divider()
 
     # --- Detailed Results Table ---
-    render_results_table(data)
+    render_results_table_fragment(results_df)
+
+@st.fragment
+def render_user_aggregation_fragment(agg_df):
+    """
+    Renders user-level statistics with pagination in an isolated fragment.
+    """
+    st.subheader("👤 Per-User Analysis")
+    
+    if agg_df is not None and not agg_df.empty:
+        # Pagination Logic
+        items_per_page = 10
+        total_items = len(agg_df)
+        total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+        
+        if "user_agg_page" not in st.session_state:
+            st.session_state.user_agg_page = 1
+            
+        if st.session_state.user_agg_page > total_pages:
+            st.session_state.user_agg_page = total_pages
+            
+        # Pagination Controls (Top)
+        ua1, ua2, ua3 = st.columns([1, 2, 1])
+        with ua1:
+            if st.button("⬅️ Prev", disabled=st.session_state.user_agg_page <= 1, key="ua_prev", use_container_width=True):
+                st.session_state.user_agg_page -= 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+        with ua2:
+            pass # Placeholder
+        with ua3:
+            if st.button("Next ➡️", disabled=st.session_state.user_agg_page >= total_pages, key="ua_next", use_container_width=True):
+                st.session_state.user_agg_page += 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+
+        start_idx = (st.session_state.user_agg_page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+
+        with ua2:
+            st.markdown(f"<p style='text-align:center;'>Page <b>{st.session_state.user_agg_page}</b> of <b>{total_pages}</b></p>", unsafe_allow_html=True)
+                
+        df_page = agg_df.iloc[start_idx:end_idx]
+        st.dataframe(df_page, use_container_width=True, hide_index=True)
+    else:
+        st.info("Insufficient data for user-level aggregation.")
+    st.divider()
+
+@st.fragment
+def render_results_table_fragment(results_df):
+    """
+    Renders the detailed results table in a fragment for instant pagination.
+    """
+    render_results_table(results_df)
 
 def normalize_dataframe_columns(df):
     """
@@ -185,6 +245,13 @@ def normalize_dataframe_columns(df):
     if text_col:
         df.rename(columns={text_col: 'feedback_text'}, inplace=True)
     return df
+
+@st.fragment
+def render_visualizations_fragment(data, df_to_plot):
+    """
+    Renders selected or all charts in an isolated fragment for high-speed switching.
+    """
+    render_visualizations(data, df_to_plot)
 
 def render_visualizations(data, df_to_plot):
     """
@@ -271,9 +338,9 @@ def render_keyword_tabs(data):
         else:
             st.info("TF-IDF data unavailable.")
 
-def render_results_table(data):
+def render_results_table(results_df):
     """
-    Renders the fully searchable and sortable results table.
+    Renders the fully searchable and sortable results table with pagination.
     """
     st.subheader("📋 Raw Data Review")
 
@@ -291,7 +358,7 @@ def render_results_table(data):
             key="sort_order"
         )
 
-    res_df_display = pd.DataFrame(data["results"])
+    res_df_display = results_df.copy()
 
     if sentiment_filter != "All":
         res_df_display = res_df_display[res_df_display["label"] == sentiment_filter.upper()]
@@ -300,4 +367,45 @@ def render_results_table(data):
         ascending = (sort_order == "Ascending (Low to High)")
         res_df_display = res_df_display.sort_values("score", ascending=ascending)
 
-    st.dataframe(res_df_display, use_container_width=True, hide_index=True)
+    # --- Pagination Logic ---
+    items_per_page = 10
+    total_items = len(res_df_display)
+    total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+
+    if "feedback_page_num" not in st.session_state:
+        st.session_state.feedback_page_num = 1
+
+    # Clamp page number
+    if st.session_state.feedback_page_num > total_pages:
+        st.session_state.feedback_page_num = total_pages
+    if st.session_state.feedback_page_num < 1:
+        st.session_state.feedback_page_num = 1
+
+    # Pagination Controls (Top)
+    p1, p2, p3 = st.columns([1, 2, 1])
+    with p1:
+        if st.button("⬅️ Previous", disabled=st.session_state.feedback_page_num <= 1, key="fb_prev", use_container_width=True):
+            st.session_state.feedback_page_num -= 1
+            try: st.rerun(scope="fragment")
+            except: st.rerun()
+    with p2:
+        pass # Placeholder 
+    with p3:
+        if st.button("Next ➡️", disabled=st.session_state.feedback_page_num >= total_pages, key="fb_next", use_container_width=True):
+            st.session_state.feedback_page_num += 1
+            try: st.rerun(scope="fragment")
+            except: st.rerun()
+
+    start_idx = (st.session_state.feedback_page_num - 1) * items_per_page
+    end_idx = start_idx + items_per_page
+
+    with p2:
+        st.markdown(
+            f"<div style='text-align: center; padding-top: 5px;'>"
+            f"Page <b>{st.session_state.feedback_page_num}</b> of <b>{total_pages}</b>"
+            f"<br><small>{total_items} results total</small></div>", 
+            unsafe_allow_html=True
+        )
+
+    df_page = res_df_display.iloc[start_idx:end_idx]
+    st.dataframe(df_page, use_container_width=True, hide_index=True)

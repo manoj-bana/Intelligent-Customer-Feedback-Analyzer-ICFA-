@@ -10,6 +10,7 @@ COLOR_MAP = {
     'NEGATIVE': '#dc3545'
 }
 
+@st.cache_data
 def generate_sentiment_bar_chart(df):
     sentiment_counts = df['sentiment_label'].str.upper().value_counts().reset_index()
     sentiment_counts.columns = ['Sentiment', 'Count']
@@ -17,6 +18,7 @@ def generate_sentiment_bar_chart(df):
                  color_discrete_map=COLOR_MAP, title='Sentiment Distribution')
     st.plotly_chart(fig, use_container_width=True)
 
+@st.cache_data
 def generate_sentiment_line_chart(df):
     date_col = next((col for col in ['date', 'timestamp', 'created_at', 'time'] if col.lower() in [c.lower() for c in df.columns]), None)
     if date_col:
@@ -41,6 +43,7 @@ def generate_sentiment_line_chart(df):
     else:
         st.info("No timeline data (date/time column) available for Sentiment Over Time chart.")
 
+@st.cache_data
 def generate_sentiment_pie_chart(df):
     sentiment_counts = df['sentiment_label'].str.upper().value_counts().reset_index()
     sentiment_counts.columns = ['Sentiment', 'Count']
@@ -48,6 +51,7 @@ def generate_sentiment_pie_chart(df):
                  color_discrete_map=COLOR_MAP, title='Sentiment Share')
     st.plotly_chart(fig, use_container_width=True)
 
+@st.cache_data
 def generate_keyword_frequency_chart(freq_data):
     if not freq_data:
         st.info("No keywords available.")
@@ -58,13 +62,12 @@ def generate_keyword_frequency_chart(freq_data):
     fig.update_layout(yaxis={'categoryorder': 'total ascending'})
     st.plotly_chart(fig, use_container_width=True)
 
+@st.cache_data
 def generate_wordcloud(text_data):
     if not text_data.strip():
         st.info("No text available for Word Cloud.")
         return
     wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis', max_words=100).generate(text_data)
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.imshow(wordcloud, interpolation='bilinear')
-    ax.axis('off')
+    img = wordcloud.to_array()
     st.markdown("##### Word Cloud")
-    st.pyplot(fig)
+    st.image(img, use_container_width=True)
