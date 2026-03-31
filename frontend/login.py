@@ -154,16 +154,13 @@ def render_password_reset_flow():
             if answer:
                 try:
                     resp = requests.post(
-                        f'{API_URL}/verify-security-answer', # Wait, should be /auth/verify-security-answer
+                        f'{API_URL}/auth/verify-security-answer',
                         json={
                             "username": st.session_state.forgot_username,
                             "answer": answer
                         }, 
                         timeout=10
                     )
-                    # Correcting my own mistake in the prompt: it's /auth/verify-security-answer
-                    # Actually, I should check auth.py routers again. 
-                    # Yes, it's prefix="/auth" in main.py, so it's /auth/verify-security-answer
                     if resp.status_code == 200:
                         st.session_state.forgot_temp_token = resp.json()['temp_token']
                         st.session_state.forgot_step = 2
