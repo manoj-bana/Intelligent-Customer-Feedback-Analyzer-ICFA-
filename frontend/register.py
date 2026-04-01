@@ -150,7 +150,7 @@ def show():
         )
         # st.caption("🔒 Your answer is normalized and hashed for security.")
 
-        if st.button("Complete Registration", use_container_width=True, type="primary"):
+        if st.button("Complete Registration", width='stretch', type="primary"):
             # Final validation
             errors = []
             if not username or not email or not password or not confirm_password or not answer:
