@@ -104,28 +104,46 @@ def show():
         list(case_mapping.keys()), 
         key="select_sentiment_dataset"
     )
-    if st.button("📊 View Report", use_container_width=True, key="btn_view_sentiment"):
+    if st.button("📊 View Report", width='stretch', key="btn_view_sentiment"):
         # Clear previous search when viewing a new report
         if "feedback_search_query" in st.session_state:
             st.session_state.feedback_search_query = ""
             
         case_id = case_mapping[selected_case_label]
-        with st.spinner("Fetching analysis results..."):
+        with st.spinner("Preparing high-performance report data..."):
             try:
                 res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
                 if res.status_code == 200:
-                    st.session_state.analysis_results = res.json()
+                    results_data = res.json()
+                    st.session_state.analysis_results = results_data
+                    
+                    # --- Optimized Pre-processing (Using new features) ---
+                    st.session_state.processed_results_df = get_processed_results(results_data.get("results", []))
+                    
+                    df_enriched = get_processed_enriched(results_data.get("enriched_csv"))
+                    st.session_state.processed_enriched_df = df_enriched
+                    
+                    if df_enriched is not None:
+                        st.session_state.processed_agg_df = get_cached_aggregation(df_enriched)
+                    else:
+                        st.session_state.processed_agg_df = None
+                        
                 else:
                     st.error(f"Error fetching results: {res.text}")
             except Exception as e:
-                st.error(f"Connection error: {e}")
+                st.error(f"Processing error: {e}")
 
     if "analysis_results" in st.session_state:
-        show_results(st.session_state.analysis_results)
+        show_results(
+            st.session_state.analysis_results,
+            st.session_state.get("processed_results_df"),
+            st.session_state.get("processed_enriched_df"),
+            st.session_state.get("processed_agg_df")
+        )
 
-def show_results(data):
+def show_results(data, results_df, df_enriched, agg_df):
     """
-    Renders the analysis results, including metric cards, charts, and detailed keyword data.
+    Renders optimized reports using pre-processed dataframes with search support.
     """
     st.success(f"✅ Analyzed {data['total']} reviews!")
 
@@ -136,19 +154,8 @@ def show_results(data):
     m3.metric("Neutral Reviews", data["neutral"])
     st.divider()
 
-    # --- Move Global Search Bar logic back into local sections later ---
-
-    # --- Data Preparation (Cached) ---
-    results_df = get_processed_results(data["results"])
-    df_enriched = get_processed_enriched(data.get("enriched_csv"))
-
-
-
-
-
-
     # Export Section
-    if df_enriched is not None or not results_df.empty:
+    if df_enriched is not None or (results_df is not None and not results_df.empty):
         st.subheader("📥 Export Analysis Report")
         col_fmt, col_btn = st.columns([1, 1])
         with col_fmt:
@@ -164,66 +171,20 @@ def show_results(data):
                 data=export_data,
                 file_name=f"feedback_report.{export_fmt.lower()}",
                 mime="application/octet-stream",
-                use_container_width=True,
+                width='stretch',
             )
         st.divider()
 
     df_to_plot = df_enriched if df_enriched is not None and not df_enriched.empty else results_df
-
-    if 'sentiment_label' not in df_to_plot.columns:
+    if df_to_plot is not None and 'sentiment_label' not in df_to_plot.columns:
         df_to_plot['sentiment_label'] = df_to_plot.get('label', 'UNKNOWN')
 
     # --- Visualizations Pipeline ---
-    render_visualizations(data, df_to_plot)
+    render_visualizations_fragment(data, df_to_plot)
     
     # --- User-Level Aggregation ---
     if df_enriched is not None:
-        # Cached aggregation is critical for speed on large datasets
-        agg_df_all = get_cached_aggregation(df_enriched)
-        
-        @st.fragment
-        def render_user_aggregation():
-            st.subheader("👤 Per-User Analysis")
-            
-            # Move CLEAR logic ABOVE the widget instantiation
-            if st.session_state.get("clear_agg"):
-                st.session_state.agg_q_in = ""
-                st.session_state.clear_agg = False
-                
-            with st.form("agg_search_form"):
-                c_in, c_search, c_clear = st.columns([3, 1, 1])
-                with c_in:
-                    agg_query = st.text_input("Search ID", key="agg_q_in", label_visibility="collapsed", placeholder="Enter ID...")
-                with c_search:
-                    st.form_submit_button("Search")
-                with c_clear:
-                    if st.form_submit_button("Clear"):
-                        st.session_state.clear_agg = True
-                        st.rerun(scope="fragment")
-
-            agg_df = agg_df_all.copy() if agg_df_all is not None else None
-            
-            # Fast local filtering
-            if agg_query and agg_df is not None:
-                if '_search_id' in agg_df.columns:
-                     agg_df = agg_df[agg_df['_search_id'].str.startswith(agg_query.strip().lower())]
-                else:
-                    id_cols = [c for c in agg_df.columns if any(k in c.lower() for k in ["userid", "user id", "customerid", "customer id", "user", "id"])]
-                    if id_cols:
-                        agg_df = agg_df[agg_df[id_cols[0]].astype(str).str.lower().str.startswith(agg_query.strip().lower())]
-            elif agg_df is not None:
-                st.caption("Showing preview of first 1,000 users. Use 'Search ID' to find specific customers.")
-                agg_df = agg_df.head(1000)
-
-            if agg_df is not None and not agg_df.empty:
-                st.dataframe(agg_df, use_container_width=True, hide_index=True)
-            else:
-                st.warning("⚠️ No records found.")
-        
-        render_user_aggregation()
-
-        st.divider()
-
+        render_user_aggregation_fragment_v2(agg_df)
 
     # --- Keyword Discovery ---
     render_keyword_tabs(data)
@@ -231,8 +192,74 @@ def show_results(data):
     st.divider()
 
     # --- Detailed Results Table ---
-    render_results_table(data, results_df)
+    render_results_table_v2(results_df)
 
+@st.fragment
+def render_user_aggregation_fragment_v2(agg_df_all):
+    """
+    Renders user-level statistics with SEARCH and PAGINATION.
+    """
+    st.subheader("👤 Per-User Analysis")
+    
+    if st.session_state.get("clear_agg"):
+        st.session_state.agg_q_in = ""
+        st.session_state.clear_agg = False
+        
+    with st.form("agg_search_form"):
+        c_in, c_search, c_clear = st.columns([3, 1, 1])
+        with c_in:
+            agg_query = st.text_input("Search ID", key="agg_q_in", label_visibility="collapsed", placeholder="Enter ID...")
+        with c_search:
+            st.form_submit_button("Search")
+        with c_clear:
+            if st.form_submit_button("Clear"):
+                st.session_state.clear_agg = True
+                st.rerun(scope="fragment")
+
+    agg_df = agg_df_all.copy() if agg_df_all is not None else None
+    
+    # Fast local filtering
+    if agg_query and agg_df is not None:
+        if '_search_id' in agg_df.columns:
+             agg_df = agg_df[agg_df['_search_id'].str.startswith(agg_query.strip().lower())]
+        else:
+            id_cols = [c for c in agg_df.columns if any(k in c.lower() for k in ["userid", "user id", "customerid", "customer id", "user", "id"])]
+            if id_cols:
+                agg_df = agg_df[agg_df[id_cols[0]].astype(str).str.lower().str.startswith(agg_query.strip().lower())]
+    
+    if agg_df is not None and not agg_df.empty:
+        # --- Pagination Logic ---
+        items_per_page = 10
+        total_items = len(agg_df)
+        total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+        
+        if "user_agg_page" not in st.session_state:
+            st.session_state.user_agg_page = 1
+        if st.session_state.user_agg_page > total_pages:
+            st.session_state.user_agg_page = total_pages
+            
+        ua1, ua2, ua3 = st.columns([1, 2, 1])
+        with ua1:
+            if st.button("⬅️ Prev", disabled=st.session_state.user_agg_page <= 1, key="ua_prev", width='stretch'):
+                st.session_state.user_agg_page -= 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+        with ua3:
+            if st.button("Next ➡️", disabled=st.session_state.user_agg_page >= total_pages, key="ua_next", width='stretch'):
+                st.session_state.user_agg_page += 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+
+        start_idx = (st.session_state.user_agg_page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        with ua2:
+            st.markdown(f"<p style='text-align:center;'>Page <b>{st.session_state.user_agg_page}</b> of <b>{total_pages}</b></p>", unsafe_allow_html=True)
+                
+        df_page = agg_df.iloc[start_idx:end_idx]
+        st.dataframe(df_page, width='stretch', hide_index=True)
+    else:
+        st.warning("⚠️ No records found.")
+    st.divider()
 
 def normalize_dataframe_columns(df):
     """
@@ -249,6 +276,7 @@ def normalize_dataframe_columns(df):
             None
         )
     if sentiment_col:
+        # Use loc to avoid SettingWithCopyWarning
         df.rename(columns={sentiment_col: 'sentiment_label'}, inplace=True)
 
     # Map Text dynamically
@@ -262,8 +290,16 @@ def normalize_dataframe_columns(df):
             None
         )
     if text_col:
+        # Use loc to avoid SettingWithCopyWarning
         df.rename(columns={text_col: 'feedback_text'}, inplace=True)
     return df
+
+@st.fragment
+def render_visualizations_fragment(data, df_to_plot):
+    """
+    Renders selected or all charts in an isolated fragment for high-speed switching.
+    """
+    render_visualizations(data, df_to_plot)
 
 def render_visualizations(data, df_to_plot):
     """
@@ -337,7 +373,7 @@ def render_keyword_tabs(data):
         freq_kw = data.get("freq_keywords") or data.get("keywords", [])
         if freq_kw:
             freq_df = pd.DataFrame(freq_kw)[["word", "count"]]
-            st.dataframe(freq_df, use_container_width=True, hide_index=True)
+            st.dataframe(freq_df, width='stretch', hide_index=True)
         else:
             st.info("Frequency data unavailable.")
 
@@ -346,14 +382,13 @@ def render_keyword_tabs(data):
         tfidf_kw = data.get("tfidf_keywords", [])
         if tfidf_kw:
             tfidf_df = pd.DataFrame(tfidf_kw)[["word", "score"]]
-            st.dataframe(tfidf_df, use_container_width=True, hide_index=True)
+            st.dataframe(tfidf_df, width='stretch', hide_index=True)
         else:
             st.info("TF-IDF data unavailable.")
 
-def render_results_table(data, results_df):
+def render_results_table_v2(results_df):
     """
-    Renders the fully searchable and sortable results table as a fragment.
-    Only this section re-renders on search/clear, not the entire page.
+    Renders the fully searchable and sortable results table with SEARCH and PAGINATION.
     """
     @st.fragment
     def _results_fragment():
@@ -393,33 +428,22 @@ def render_results_table(data, results_df):
         # Apply fast local filtering
         if res_query:
             query_lower = res_query.strip().lower()
-            
-            # Find the ID column directly (not from cache)
             exclude = {'score', 'sentiment_label', 'feedback_text', '_search_id', '_search_all'}
             id_col = None
             for c in res_df_display.columns:
-                if c in exclude:
-                    continue
-                cl = c.lower()
-                if any(k in cl for k in ["userid", "user_id", "customerid", "customer_id", "customer id", "id"]):
+                if c in exclude: continue
+                if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"]):
                     id_col = c
                     break
             
             if id_col:
-                # Exact match on ID column — "540" finds ONLY Id=540
-                res_df_display = res_df_display[
-                    res_df_display[id_col].astype(str).str.strip().str.lower() == query_lower
-                ]
+                res_df_display = res_df_display[res_df_display[id_col].astype(str).str.strip().str.lower() == query_lower]
             else:
-                # No ID column found — search all text columns
                 str_cols = [c for c in res_df_display.columns if c not in exclude]
                 mask = pd.Series(False, index=res_df_display.index)
                 for col in str_cols:
                     mask |= res_df_display[col].astype(str).str.lower().str.contains(query_lower, na=False, regex=False)
                 res_df_display = res_df_display[mask]
-        else:
-            st.caption("Showing preview of first 1,000 records. Use 'Search ID' to find specific records.")
-            res_df_display = res_df_display.head(1000)
 
         # Use the correct renamed column for sentiment filtering
         sentiment_col = 'sentiment_label' if 'sentiment_label' in res_df_display.columns else 'label'
@@ -430,12 +454,39 @@ def render_results_table(data, results_df):
             ascending = (sort_order == "Ascending (Low to High)")
             res_df_display = res_df_display.sort_values("score", ascending=ascending)
 
-        # Hide internal search columns from display
-        display_cols = [c for c in res_df_display.columns if c not in ['_search_id', '_search_all']]
-
-        if res_df_display.empty and res_query:
+        if res_df_display.empty:
             st.warning("⚠️ No records found.")
-        else:
-            st.dataframe(res_df_display[display_cols], use_container_width=True, hide_index=True)
+            return
+
+        # --- Pagination Logic ---
+        items_per_page = 10
+        total_items = len(res_df_display)
+        total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+
+        if "feedback_page_num" not in st.session_state:
+            st.session_state.feedback_page_num = 1
+        if st.session_state.feedback_page_num > total_pages:
+            st.session_state.feedback_page_num = total_pages
+
+        p1, p2, p3 = st.columns([1, 2, 1])
+        with p1:
+            if st.button("⬅️ Previous", disabled=st.session_state.feedback_page_num <= 1, key="fb_prev", width='stretch'):
+                st.session_state.feedback_page_num -= 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+        with p3:
+            if st.button("Next ➡️", disabled=st.session_state.feedback_page_num >= total_pages, key="fb_next", width='stretch'):
+                st.session_state.feedback_page_num += 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+
+        start_idx = (st.session_state.feedback_page_num - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        with p2:
+            st.markdown(f"<div style='text-align: center; padding-top: 5px;'>Page <b>{st.session_state.feedback_page_num}</b> of <b>{total_pages}</b><br><small>{total_items} results total</small></div>", unsafe_allow_html=True)
+
+        display_cols = [c for c in res_df_display.columns if c not in ['_search_id', '_search_all']]
+        df_page = res_df_display.iloc[start_idx:end_idx]
+        st.dataframe(df_page[display_cols], width='stretch', hide_index=True)
     
     _results_fragment()

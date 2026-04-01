@@ -24,7 +24,7 @@ def show():
             ["Sentiment Analysis", "Churn Prediction"]
         )
         
-        if st.button("🚀 Upload & Process", use_container_width=True, type="primary"):
+        if st.button("🚀 Upload & Process", width='stretch', type="primary"):
             if not uploaded_file:
                 st.error("Please upload a file first.")
             else:
@@ -58,6 +58,15 @@ def handle_upload(uploaded_file, task_type):
             
             if response.status_code == 200:
                 case_id = response.json().get("case_id")
+                
+                # Clear our data cache instantly so the dashboard updates without delay
+                try:
+                    from frontend.pages.dashboard import get_cases
+                    get_cases.clear()
+                except Exception:
+                    # Fallback to clearing all cache if local clear fails
+                    st.cache_data.clear()
+                
                 st.success(f"✅ Upload successful! Tracking ID: **{case_id}**")
                 st.info(
                     "The dataset is now in the **Pending Review** queue and will be "

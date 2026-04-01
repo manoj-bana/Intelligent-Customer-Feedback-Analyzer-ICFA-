@@ -25,6 +25,7 @@ def load_data(uploaded_file):
         st.error(f"Invalid file format or error reading CSV: {e}")
         return None, None
 
+@st.cache_data
 def aggregate_user_data(df):
     user_col = next((col for col in ['user_id', 'userid', 'user'] if col.lower() in [c.lower() for c in df.columns]), None)
     if not user_col:
