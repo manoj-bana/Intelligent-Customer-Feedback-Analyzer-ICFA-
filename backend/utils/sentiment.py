@@ -64,38 +64,11 @@ def _clean_text_for_keywords(text: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).lower()
     return cleaned
 
-from fuzzywuzzy import process
-
-# High-impact sentiment words for fuzzy correction (derived from VADER's top valence scores)
-SENTIMENT_LEXICON = [
-    "excellent", "amazing", "great", "good", "happy", "love", "best", "awesome", "fantastic", "perfect",
-    "helpful", "fast", "easy", "efficient", "recommend", "brilliant", "wonderful", "outstanding", "superb", "delighted",
-    "terrible", "horrible", "awful", "bad", "hate", "worst", "expensive", "slow", "broken", "useless",
-    "frustrated", "annoyed", "rude", "poor", "difficult", "failed", "waste", "missing", "unhelpful", "disappointed"
-]
-
 def _clean_text_for_sentiment(text: str) -> str:
     """
-    Generalized cleaning with Fuzzy Lexicon Correction.
-    Detects and fixes OCR typos for high-impact sentiment words.
+    Standard text cleaning for sentiment analysis.
     """
-    if not text:
-        return ""
-        
-    words = str(text).lower().split()
-    corrected_words = []
-    
-    for word in words:
-        # Only attempt fuzzy correction on words of a certain length to avoid false positives
-        if len(word) >= 4:
-            # Check if word is already a close match to something in our lexicon
-            match, score = process.extractOne(word, SENTIMENT_LEXICON)
-            if score >= 85: # High confidence threshold
-                corrected_words.append(match)
-                continue
-        corrected_words.append(word)
-        
-    return " ".join(corrected_words)
+    return str(text).lower() if text else ""
 
 def analyze_sentiment(text: str) -> dict:
     """

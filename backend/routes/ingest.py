@@ -43,6 +43,12 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
         if not dataset:
             return
 
+        if file_path.endswith((".xlsx", ".xls")):
+            df_temp = pd.read_excel(file_path)
+            new_file_path = file_path.rsplit('.', 1)[0] + '.csv'
+            df_temp.to_csv(new_file_path, index=False)
+            file_path = new_file_path
+
         out_results = {}
         if task_type == "Sentiment Analysis":
             CHUNK_SIZE, MAX_ROWS = 5000, 500_000
@@ -175,9 +181,11 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
 
     except Exception as e:
         db.rollback()
-        if dataset:
-            dataset.review_status = f"Error: {e}"
+        try:
+            db.query(Dataset).filter(Dataset.case_id == case_id).update({"review_status": f"Error: {str(e)[:100]}"})
             db.commit()
+        except:
+            db.rollback()
     finally:
         db.close()
 
