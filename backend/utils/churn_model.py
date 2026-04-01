@@ -115,9 +115,14 @@ def predict_churn(df: pd.DataFrame) -> dict:
     probs = model.predict_proba(processed)[:, 1]
     predictions = (probs >= 0.5).astype(int)
     
+    # Try to find a customer ID column to preserve
+    id_col = next((c for c in df.columns if any(k in c.lower() for k in ["customerid", "customer_id", "userid", "user_id", "id"])), None)
+    
     results = []
     for i, (p, prob) in enumerate(zip(predictions, probs)):
+        # Base result with single consistent field name
         results.append({
+            "customer_id": str(df.iloc[i][id_col]) if id_col else str(i + 1),
             "customer_index": i + 1,
             "churn_prediction": "Yes" if p == 1 else "No",
             "churn_probability": round(float(prob), 3),
@@ -131,6 +136,7 @@ def predict_churn(df: pd.DataFrame) -> dict:
         "total_customers": total_count,
         "predicted_churn": churn_count,
         "churn_rate": round(churn_count / total_count * 100, 2) if total_count > 0 else 0,
-        "predictions": results[:100],
+        "predictions": results,
         "warnings": validation.get("hints", [])
+
     }

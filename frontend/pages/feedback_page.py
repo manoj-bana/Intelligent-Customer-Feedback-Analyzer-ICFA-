@@ -15,6 +15,48 @@ from frontend.utils.export_utils import export_to_format
 
 API_URL = "http://127.0.0.1:8000"
 
+@st.cache_data
+def get_cached_aggregation(df):
+    """Caches the expensive user-level data aggregation."""
+    agg = aggregate_user_data(df)
+    if agg is not None:
+         id_cols = [c for c in agg.columns if any(k in c.lower() for k in ["userid", "user id", "customerid", "customer id", "user", "id"])]
+         if id_cols:
+              agg['_search_id'] = agg[id_cols[0]].astype(str).str.lower()
+    return agg
+
+@st.cache_data
+def get_processed_results(data_results):
+    """Caches results dataframe and pre-calculates a universal search index."""
+    df = pd.DataFrame(data_results)
+    if 'label' in df.columns:
+         df.rename(columns={'label': 'sentiment_label'}, inplace=True)
+    if 'review' in df.columns:
+         df.rename(columns={'review': 'feedback_text'}, inplace=True)
+    
+    # Identify the ID column — match the same patterns as the backend
+    # Exclude known non-ID columns to avoid false matches
+    exclude_cols = {'score', 'sentiment_label', 'feedback_text', '_search_id', '_search_all'}
+    id_cols = [c for c in df.columns if c not in exclude_cols and 
+               any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])]
+    if id_cols:
+        df['_search_id'] = df[id_cols[0]].astype(str).str.strip().str.lower()
+    return df
+
+@st.cache_data
+def get_processed_enriched(csv_b64):
+    """Caches enriched CSV parsing."""
+    if not csv_b64: return None
+    try:
+        csv_bytes = base64.b64decode(csv_b64)
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+        # Ensure searching works on enriched as well
+        id_cols = [c for c in df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])]
+        if id_cols:
+            df['_search_id'] = df[id_cols[0]].astype(str).str.lower()
+        return normalize_dataframe_columns(df)
+    except Exception: return None
+
 def show():
     """
     Main entry point for the Sentiment Analysis report page. 
@@ -59,24 +101,46 @@ def show():
         list(case_mapping.keys()), 
         key="select_sentiment_dataset"
     )
-    if st.button("📊 View Report", use_container_width=True, key="btn_view_sentiment"):
+    if st.button("📊 View Report", width='stretch', key="btn_view_sentiment"):
+        # Clear previous search when viewing a new report
+        if "feedback_search_query" in st.session_state:
+            st.session_state.feedback_search_query = ""
+            
         case_id = case_mapping[selected_case_label]
-        with st.spinner("Fetching analysis results..."):
+        with st.spinner("Preparing high-performance report data..."):
             try:
                 res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
                 if res.status_code == 200:
-                    st.session_state.analysis_results = res.json()
+                    results_data = res.json()
+                    st.session_state.analysis_results = results_data
+                    
+                    # --- Optimized Pre-processing (Using new features) ---
+                    st.session_state.processed_results_df = get_processed_results(results_data.get("results", []))
+                    
+                    df_enriched = get_processed_enriched(results_data.get("enriched_csv"))
+                    st.session_state.processed_enriched_df = df_enriched
+                    
+                    if df_enriched is not None:
+                        st.session_state.processed_agg_df = get_cached_aggregation(df_enriched)
+                    else:
+                        st.session_state.processed_agg_df = None
+                        
                 else:
                     st.error(f"Error fetching results: {res.text}")
             except Exception as e:
-                st.error(f"Connection error: {e}")
+                st.error(f"Processing error: {e}")
 
     if "analysis_results" in st.session_state:
-        show_results(st.session_state.analysis_results)
+        show_results(
+            st.session_state.analysis_results,
+            st.session_state.get("processed_results_df"),
+            st.session_state.get("processed_enriched_df"),
+            st.session_state.get("processed_agg_df")
+        )
 
-def show_results(data):
+def show_results(data, results_df, df_enriched, agg_df):
     """
-    Renders the analysis results, including metric cards, charts, and detailed keyword data.
+    Renders optimized reports using pre-processed dataframes with search support.
     """
     st.subheader("📊 Key Performance Indicators")
     total = data['total']
@@ -105,24 +169,8 @@ def show_results(data):
 
     st.divider()
 
-    # --- Data Preparation ---
-    results_df = pd.DataFrame(data["results"])
-    if 'label' in results_df.columns:
-        results_df.rename(columns={'label': 'sentiment_label'}, inplace=True)
-    if 'review' in results_df.columns:
-        results_df.rename(columns={'review': 'feedback_text'}, inplace=True)
-
-    df_enriched = None
-    if "enriched_csv" in data and data["enriched_csv"]:
-        try:
-            csv_bytes = base64.b64decode(data["enriched_csv"])
-            df_enriched = pd.read_csv(io.BytesIO(csv_bytes))
-            df_enriched = normalize_dataframe_columns(df_enriched)
-        except Exception as e:
-            st.error(f"Error parsing enriched dataset: {e}")
-
     # Export Section
-    if df_enriched is not None or not results_df.empty:
+    if df_enriched is not None or (results_df is not None and not results_df.empty):
         st.subheader("📥 Export Analysis Report")
         col_fmt, col_btn = st.columns([1, 1])
         with col_fmt:
@@ -137,37 +185,20 @@ def show_results(data):
                 data=export_data,
                 file_name=f"feedback_report.{export_fmt.lower()}",
                 mime="application/octet-stream",
-                use_container_width=True,
+                width='stretch',
             )
         st.divider()
 
     df_to_plot = df_enriched if df_enriched is not None and not df_enriched.empty else results_df
-
-    if 'sentiment_label' not in df_to_plot.columns:
+    if df_to_plot is not None and 'sentiment_label' not in df_to_plot.columns:
         df_to_plot['sentiment_label'] = df_to_plot.get('label', 'UNKNOWN')
 
     # --- Visualizations Pipeline ---
-    render_visualizations(data, df_to_plot)
+    render_visualizations_fragment(data, df_to_plot)
     
-    st.divider()
-
     # --- User-Level Aggregation ---
-    user_agg_data = data.get("user_engagement")
-    if user_agg_data or df_enriched is not None:
-        with st.expander("👤 User-Specific Engagement Analysis", expanded=False):
-            st.write("Identifies high-volume contributors and their dominant sentiment profiles.")
-            
-            agg_df = None
-            if user_agg_data:
-                agg_df = pd.DataFrame(user_agg_data)
-            elif df_enriched is not None:
-                agg_df = aggregate_user_data(df_enriched)
-            
-            if agg_df is not None and not agg_df.empty:
-                st.dataframe(agg_df, use_container_width=True, hide_index=True)
-            else:
-                st.info("User-level data (IDs) not identified in this dataset.")
-        st.divider()
+    if df_enriched is not None:
+        render_user_aggregation_fragment_v2(agg_df)
 
     # --- Keyword Discovery ---
     render_keyword_tabs(data)
@@ -175,7 +206,74 @@ def show_results(data):
     st.divider()
 
     # --- Detailed Results Table ---
-    render_results_table(data)
+    render_results_table_v2(results_df)
+
+@st.fragment
+def render_user_aggregation_fragment_v2(agg_df_all):
+    """
+    Renders user-level statistics with SEARCH and PAGINATION.
+    """
+    st.subheader("👤 Per-User Analysis")
+    
+    if st.session_state.get("clear_agg"):
+        st.session_state.agg_q_in = ""
+        st.session_state.clear_agg = False
+        
+    with st.form("agg_search_form"):
+        c_in, c_search, c_clear = st.columns([3, 1, 1])
+        with c_in:
+            agg_query = st.text_input("Search ID", key="agg_q_in", label_visibility="collapsed", placeholder="Enter ID...")
+        with c_search:
+            st.form_submit_button("Search")
+        with c_clear:
+            if st.form_submit_button("Clear"):
+                st.session_state.clear_agg = True
+                st.rerun(scope="fragment")
+
+    agg_df = agg_df_all.copy() if agg_df_all is not None else None
+    
+    # Fast local filtering
+    if agg_query and agg_df is not None:
+        if '_search_id' in agg_df.columns:
+             agg_df = agg_df[agg_df['_search_id'].str.startswith(agg_query.strip().lower())]
+        else:
+            id_cols = [c for c in agg_df.columns if any(k in c.lower() for k in ["userid", "user id", "customerid", "customer id", "user", "id"])]
+            if id_cols:
+                agg_df = agg_df[agg_df[id_cols[0]].astype(str).str.lower().str.startswith(agg_query.strip().lower())]
+    
+    if agg_df is not None and not agg_df.empty:
+        # --- Pagination Logic ---
+        items_per_page = 10
+        total_items = len(agg_df)
+        total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+        
+        if "user_agg_page" not in st.session_state:
+            st.session_state.user_agg_page = 1
+        if st.session_state.user_agg_page > total_pages:
+            st.session_state.user_agg_page = total_pages
+            
+        ua1, ua2, ua3 = st.columns([1, 2, 1])
+        with ua1:
+            if st.button("⬅️ Prev", disabled=st.session_state.user_agg_page <= 1, key="ua_prev", width='stretch'):
+                st.session_state.user_agg_page -= 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+        with ua3:
+            if st.button("Next ➡️", disabled=st.session_state.user_agg_page >= total_pages, key="ua_next", width='stretch'):
+                st.session_state.user_agg_page += 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+
+        start_idx = (st.session_state.user_agg_page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        with ua2:
+            st.markdown(f"<p style='text-align:center;'>Page <b>{st.session_state.user_agg_page}</b> of <b>{total_pages}</b></p>", unsafe_allow_html=True)
+                
+        df_page = agg_df.iloc[start_idx:end_idx]
+        st.dataframe(df_page, width='stretch', hide_index=True)
+    else:
+        st.warning("⚠️ No records found.")
+    st.divider()
 
 def normalize_dataframe_columns(df):
     """
@@ -192,6 +290,7 @@ def normalize_dataframe_columns(df):
             None
         )
     if sentiment_col:
+        # Use loc to avoid SettingWithCopyWarning
         df.rename(columns={sentiment_col: 'sentiment_label'}, inplace=True)
 
     # Map Text dynamically
@@ -205,8 +304,16 @@ def normalize_dataframe_columns(df):
             None
         )
     if text_col:
+        # Use loc to avoid SettingWithCopyWarning
         df.rename(columns={text_col: 'feedback_text'}, inplace=True)
     return df
+
+@st.fragment
+def render_visualizations_fragment(data, df_to_plot):
+    """
+    Renders selected or all charts in an isolated fragment for high-speed switching.
+    """
+    render_visualizations(data, df_to_plot)
 
 def render_visualizations(data, df_to_plot):
     """
@@ -266,7 +373,8 @@ def render_keyword_tabs(data):
         st.write("**Top Mentioned Topics**")
         freq_kw = data.get("freq_keywords") or data.get("keywords", [])
         if freq_kw:
-            st.dataframe(pd.DataFrame(freq_kw)[["word", "count"]], use_container_width=True, hide_index=True)
+            freq_df = pd.DataFrame(freq_kw)[["word", "count"]]
+            st.dataframe(freq_df, width='stretch', hide_index=True)
         else:
             st.info("No frequency data.")
 
@@ -274,40 +382,112 @@ def render_keyword_tabs(data):
         st.write("**Unique Sentiment Drivers (TF-IDF)**")
         tfidf_kw = data.get("tfidf_keywords", [])
         if tfidf_kw:
-            st.dataframe(pd.DataFrame(tfidf_kw)[["word", "score"]], use_container_width=True, hide_index=True)
+            tfidf_df = pd.DataFrame(tfidf_kw)[["word", "score"]]
+            st.dataframe(tfidf_df, width='stretch', hide_index=True)
         else:
             st.info("No TF-IDF data.")
 
-def render_results_table(data):
+def render_results_table_v2(results_df):
     """
-    Renders an action-oriented results table focusing on outliers.
+    Renders the fully searchable and sortable results table with SEARCH and PAGINATION.
     """
-    st.subheader("📋 Critical Review Feed")
-    st.caption("Focus on reviews with high confidence scores to identify core issues or success stories.")
+    @st.fragment
+    def _results_fragment():
+        st.subheader("📋 Raw Data Review")
+        
+        if st.session_state.get("clear_res"):
+            st.session_state.res_q_in = ""
+            st.session_state.clear_res = False
 
-    res_df = pd.DataFrame(data["results"])
+        with st.form("results_search_form"):
+            c_in, c_search, c_clear = st.columns([3, 1, 1])
+            with c_in:
+                res_query = st.text_input("Search ID", key="res_q_in", label_visibility="collapsed", placeholder="Enter ID...")
+            with c_search:
+                st.form_submit_button("Search")
+            with c_clear:
+                if st.form_submit_button("Clear"):
+                    st.session_state.clear_res = True
+                    st.rerun(scope="fragment")
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        sentiment_filter = st.selectbox("Priority Filter", ["All", "Positive", "Negative", "Neutral"], key="prio_filter")
-    with c2:
-        view_mode = st.radio("View Mode", ["Top 50 Outliers", "All Matching"], horizontal=True, key="view_mode")
+        col1, col2 = st.columns(2)
+        with col1:
+            sentiment_filter = st.selectbox(
+                "Filter by Sentiment",
+                ["All", "Positive", "Negative", "Neutral"],
+                key="sentiment_filter"
+            )
+        with col2:
+            sort_order = st.selectbox(
+                "Sort by Score",
+                ["Descending (High to Low)", "Ascending (Low to High)"],
+                key="sort_order"
+            )
 
-    if sentiment_filter != "All":
-        res_df = res_df[res_df["label"] == sentiment_filter.upper()]
+        res_df_display = results_df.copy()
 
-    if 'score' in res_df.columns:
-        res_df = res_df.sort_values("score", ascending=False)
+        # Apply fast local filtering
+        if res_query:
+            query_lower = res_query.strip().lower()
+            exclude = {'score', 'sentiment_label', 'feedback_text', '_search_id', '_search_all'}
+            id_col = None
+            for c in res_df_display.columns:
+                if c in exclude: continue
+                if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"]):
+                    id_col = c
+                    break
+            
+            if id_col:
+                res_df_display = res_df_display[res_df_display[id_col].astype(str).str.strip().str.lower() == query_lower]
+            else:
+                str_cols = [c for c in res_df_display.columns if c not in exclude]
+                mask = pd.Series(False, index=res_df_display.index)
+                for col in str_cols:
+                    mask |= res_df_display[col].astype(str).str.lower().str.contains(query_lower, na=False, regex=False)
+                res_df_display = res_df_display[mask]
 
-    display_df = res_df.head(50) if view_mode == "Top 50 Outliers" else res_df
+        # Use the correct renamed column for sentiment filtering
+        sentiment_col = 'sentiment_label' if 'sentiment_label' in res_df_display.columns else 'label'
+        if sentiment_filter != "All" and sentiment_col in res_df_display.columns:
+            res_df_display = res_df_display[res_df_display[sentiment_col] == sentiment_filter.upper()]
 
-    st.dataframe(
-        display_df, 
-        use_container_width=True, 
-        hide_index=True,
-        column_config={
-            "review": st.column_config.TextColumn("Customer Review", width="large"),
-            "label": st.column_config.TextColumn("Sentiment"),
-            "score": st.column_config.NumberColumn("Confidence")
-        }
-    )
+        if 'score' in res_df_display.columns:
+            ascending = (sort_order == "Ascending (Low to High)")
+            res_df_display = res_df_display.sort_values("score", ascending=ascending)
+
+        if res_df_display.empty:
+            st.warning("⚠️ No records found.")
+            return
+
+        # --- Pagination Logic ---
+        items_per_page = 10
+        total_items = len(res_df_display)
+        total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+
+        if "feedback_page_num" not in st.session_state:
+            st.session_state.feedback_page_num = 1
+        if st.session_state.feedback_page_num > total_pages:
+            st.session_state.feedback_page_num = total_pages
+
+        p1, p2, p3 = st.columns([1, 2, 1])
+        with p1:
+            if st.button("⬅️ Previous", disabled=st.session_state.feedback_page_num <= 1, key="fb_prev", width='stretch'):
+                st.session_state.feedback_page_num -= 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+        with p3:
+            if st.button("Next ➡️", disabled=st.session_state.feedback_page_num >= total_pages, key="fb_next", width='stretch'):
+                st.session_state.feedback_page_num += 1
+                try: st.rerun(scope="fragment")
+                except: st.rerun()
+
+        start_idx = (st.session_state.feedback_page_num - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        with p2:
+            st.markdown(f"<div style='text-align: center; padding-top: 5px;'>Page <b>{st.session_state.feedback_page_num}</b> of <b>{total_pages}</b><br><small>{total_items} results total</small></div>", unsafe_allow_html=True)
+
+        display_cols = [c for c in res_df_display.columns if c not in ['_search_id', '_search_all']]
+        df_page = res_df_display.iloc[start_idx:end_idx]
+        st.dataframe(df_page[display_cols], width='stretch', hide_index=True)
+    
+    _results_fragment()

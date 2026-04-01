@@ -71,7 +71,7 @@ def render_login_form():
     username = st.text_input("Username", key="login_username", placeholder="Enter your username")
     password = st.text_input("Password", type="password", key="login_password", placeholder="Enter your password")
     
-    if st.button("Sign In", type="primary", use_container_width=True):
+    if st.button("Sign In", type="primary", width='stretch'):
         if not username or not password:
             st.warning(f"⚠️ {ERROR_MESSAGES['FIELDS_REQUIRED']}")
         else:
@@ -98,7 +98,7 @@ def render_login_form():
             except Exception:
                 st.error(f"❌ {ERROR_MESSAGES['SERVICE_ERROR']}")
     
-    if st.button("Forgot Password?", key="forgot_link_btn", type="secondary", use_container_width=True):
+    if st.button("Forgot Password?", key="forgot_link_btn", type="secondary", width='stretch'):
         st.session_state.show_forgot_password = True
         st.rerun()
 
@@ -126,7 +126,7 @@ def render_password_reset_flow():
     if st.session_state.forgot_step == 0:
         st.markdown("**Step 1: Identity Verification**")
         f_username = st.text_input("Enter Username", key="forgot_user_input")
-        if st.button("Fetch Security Question", use_container_width=True):
+        if st.button("Fetch Security Question", width='stretch'):
             if f_username:
                 try:
                     resp = requests.post(
@@ -150,20 +150,17 @@ def render_password_reset_flow():
         st.markdown("**Step 2: Security Verification**")
         st.info(f"**Question:** {st.session_state.forgot_question}")
         answer = st.text_input("Your Answer", type="password", key="forgot_ans_input")
-        if st.button("Verify Answer", use_container_width=True):
+        if st.button("Verify Answer", width='stretch'):
             if answer:
                 try:
                     resp = requests.post(
-                        f'{API_URL}/verify-security-answer', # Wait, should be /auth/verify-security-answer
+                        f'{API_URL}/auth/verify-security-answer',
                         json={
                             "username": st.session_state.forgot_username,
                             "answer": answer
                         }, 
                         timeout=10
                     )
-                    # Correcting my own mistake in the prompt: it's /auth/verify-security-answer
-                    # Actually, I should check auth.py routers again. 
-                    # Yes, it's prefix="/auth" in main.py, so it's /auth/verify-security-answer
                     if resp.status_code == 200:
                         st.session_state.forgot_temp_token = resp.json()['temp_token']
                         st.session_state.forgot_step = 2
@@ -198,7 +195,7 @@ def render_password_reset_flow():
 
         confirm_pass = st.text_input("Confirm New Password", type="password", key="reset_pass2")
         
-        if st.button("Update Password", type="primary", use_container_width=True):
+        if st.button("Update Password", type="primary", width='stretch'):
             if not all(r[0] for r in rules):
                 st.error(f"❌ {ERROR_MESSAGES['PASSWORD_REQUIREMENTS']}")
             elif new_pass != confirm_pass:
