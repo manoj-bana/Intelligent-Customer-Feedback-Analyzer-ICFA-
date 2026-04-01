@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
+from streamlit_autorefresh import st_autorefresh
 
 from analytics_dashboard.charts import (
     generate_sentiment_bar_chart,
@@ -63,8 +64,11 @@ def get_processed_enriched(csv_b64):
 def show():
     """
     Main entry point for the Sentiment Analysis report page. 
-    Handles dataset selection and report rendering.
+    Synchronized with live results via 5s polling.
     """
+    # Silent 5s heartbeat to catch new background report completions
+    st_autorefresh(interval=5000, key="report_page_live_sync")
+    
     st.title("💬 Sentiment Analysis")
     st.markdown("Select an ingested dataset to view the sentiment analysis report.")
     st.divider()
@@ -74,29 +78,29 @@ def show():
         st.error("Authentication Error: Please login to access reports.")
         return
 
-    # Fetch user's cases safely
+    # Fetch user's cases safely (Fresh every heartbeat)
     try:
         res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
         cases_data = res.json().get("cases", []) if res.status_code == 200 else []
     except Exception:
         cases_data = []
 
-    # Get completed sentiment datasets
-    sentiment_cases = [
+    sentiment_cases = sorted([
         c for c in cases_data 
-        if c.get("task_type") == "Sentiment Analysis" and c.get("review_status") == "Completed"
-    ]
+        if c.get("task_type") == "Sentiment Analysis" and str(c.get("review_status")).lower() == "completed"
+    ], key=lambda x: x.get("id", 0), reverse=True)
 
     if not sentiment_cases:
         st.info(
             "No completed Sentiment Analysis datasets found. "
-            "Go to 'Document Ingestion' to upload one."
+            "Go to 'Document Ingestion' to start an analysis."
         )
         return
 
-    # Map labels to case IDs
+    # Map labels to case IDs (Maintaining NEWEST FIRST order)
     case_mapping = {
-        f"{c['filename']} (ID: {c['case_id']})": c['case_id'] for c in sentiment_cases
+        f"🆕 {c['filename']} (ID: {c['case_id']})" if i == 0 else f"{c['filename']} (ID: {c['case_id']})": c['case_id'] 
+        for i, c in enumerate(sentiment_cases)
     }
     
     selected_case_label = st.selectbox(

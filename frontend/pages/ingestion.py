@@ -62,7 +62,8 @@ def handle_upload(uploaded_file, task_type):
                 # Clear our data cache instantly so the dashboard updates without delay
                 try:
                     from frontend.pages.dashboard import get_cases
-                    get_cases.clear()
+                    # Cache clear removed for 0-cache performance sync
+                    pass
                 except Exception:
                     # Fallback to clearing all cache if local clear fails
                     st.cache_data.clear()

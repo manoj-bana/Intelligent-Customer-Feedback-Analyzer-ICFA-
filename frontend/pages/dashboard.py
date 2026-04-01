@@ -1,16 +1,82 @@
 import streamlit as st
 import requests
 import pandas as pd
+from streamlit_autorefresh import st_autorefresh
 
 API_URL = "http://127.0.0.1:8000"
 
+def get_notifications(username):
+    """
+    Fetches persistent system notifications from the backend.
+    """
+    try:
+        res = requests.get(f"{API_URL}/ingest/notifications/{username}", timeout=5)
+        if res.status_code == 200:
+            return res.json().get("notifications", [])
+    except: pass
+    return []
+
 def show():
     """
-    Main entry point for the dashboard. Handles sidebar navigation and page routing.
+    Main entry point for the dashboard. Handles navigation and the 
+    Persistent Notification Engine with silent auto-refresh.
     """
-    st.sidebar.title(f"👤 {st.session_state.username}")
-    st.sidebar.markdown("---")
+    username = st.session_state.get("username", "")
+    
+    # Silent 5s heartbeat for live status and notifications
+    st_autorefresh(interval=5000, limit=None, key="dashboard_notif_refresh")
+    
+    # --- Professional Notification Engine ---
+    # Polling logic: fetch fresh notifications
+    all_notifs = get_notifications(username)
+    unread_notifs = [n for n in all_notifs if n["is_read"] == 0]
+    
+    # Toast alerts for fresh high-priority notifications (Only if Unread)
+    if "last_notif_ids" not in st.session_state:
+        st.session_state.last_notif_ids = set()
+        
+    for n in unread_notifs:
+        if n["id"] not in st.session_state.last_notif_ids:
+            st.toast(n["message"], icon="🔔")
+            st.session_state.last_notif_ids.add(n["id"])
 
+    # Layout Header (Title + Professional Bell)
+    h_col1, h_col2 = st.columns([10, 1.2])
+    with h_col1:
+        pass # Title handled per-page
+        
+    with h_col2:
+        notif_count = len(unread_notifs)
+        # Dynamic label with unread indicator
+        label = f"🔔 ({notif_count})" if notif_count > 0 else "🔔"
+        
+        with st.popover(label, width='stretch'):
+            st.markdown("### 📥 Notification Inbox")
+            if not all_notifs:
+                st.info("No system activity yet.")
+            else:
+                for i, n in enumerate(all_notifs[:10]): # Show last 10
+                    # Professional styling for unread items
+                    style = "**(New)**" if n["is_read"] == 0 else ""
+                    c_n, c_v = st.columns([4, 1.2])
+                    with c_n:
+                        st.markdown(f"{style} {n['message']}")
+                        st.caption(f"🕒 {n['created_at']}")
+                    with c_v:
+                        if n["is_read"] == 0:
+                            if st.button("Read", key=f"read_{n['id']}_{i}"):
+                                try:
+                                    requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2)
+                                    st.rerun()
+                                except: pass
+                
+                st.divider()
+                st.caption("Showing 10 most recent updates.")
+
+    # --- Sidebar UI ---
+    st.sidebar.title(f"👤 {username}")
+    st.sidebar.markdown("---")
+    
     # Handle page persistence in query params
     pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
     query_page = st.query_params.get("page", "🏠 Home")
@@ -54,11 +120,10 @@ def show():
             from frontend.pages import churn_page
             churn_page.show()
 
-@st.cache_data(ttl=60) # Cache for 60 seconds to allow for new uploads
 def get_cases(username):
     """
-    Fetches analysis cases from the backend. 
-    Cached to prevent redundant API calls during pagination.
+    Fetches the latest analysis cases from the backend. 
+    Caching removed to ensure 100% status-notification synchronization.
     """
     try:
         res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
@@ -70,57 +135,33 @@ def get_cases(username):
 
 def show_home():
     """
-    Renders the Home page of the dashboard with global KPIs and a data grid of user cases.
+    Main home dashboard view. Displays fresh metrics and a list of cases.
     """
+    username = st.session_state.username
     st.title("📊 ICFA Dashboard")
-    st.markdown("### Intelligent Customer Feedback Analyzer")
-    st.divider()
 
-    username = st.session_state.get("username", "")
-
-    # --- Data Fetching ---
     cases_data = get_cases(username)
-
-    # --- KPI Calculations ---
+    
+    # Define fresh metrics with zero-division safety
     total_datasets = len(cases_data)
-    pending = sum(1 for c in cases_data if "Pending" in c["review_status"])
-    completed = total_datasets - pending
-    needs_attention = sum(1 for c in cases_data if "Error" in c["review_status"])
-
-    success_rate = 0
+    pending = len([c for c in cases_data if str(c.get("review_status")).lower() == "pending"])
+    processing = len([c for c in cases_data if str(c.get("review_status")).lower() == "processing"])
+    completed = len([c for c in cases_data if str(c.get("review_status")).lower() == "completed"])
+    
+    success_rate = 100
     if total_datasets > 0:
         success_rate = round((completed / total_datasets * 100))
-        
-    error_cases = [c for c in cases_data if "Error" in c["review_status"]]
 
-    # --- Metric Display ---
+    # --- Metrics Layout ---
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
-        st.metric(
-            "Total Datasets", 
-            total_datasets, 
-            delta=f"{success_rate}% success rate" if total_datasets > 0 else "No uploads yet"
-        )
+        st.metric("Total Datasets", total_datasets, delta=f"{success_rate}% success")
     with kpi2:
-        st.metric(
-            "Pending Review", 
-            pending, 
-            delta=f"{pending} awaiting queue" if pending > 0 else "Queue clear", 
-            delta_color="inverse"
-        )
+        st.metric("Pending Review", pending, delta=f"{pending} in queue" if pending > 0 else None, delta_color="inverse")
     with kpi3:
-        st.metric(
-            "Reviews Complete", 
-            completed, 
-            delta=f"{success_rate}% of total uploads"
-        )
+        st.metric("Processing...", processing)
     with kpi4:
-        st.metric(
-            "Needs Attention", 
-            needs_attention, 
-            delta=f"{len(error_cases)} failed jobs" if needs_attention > 0 else "All healthy", 
-            delta_color="inverse" if needs_attention > 0 else "normal"
-        )
+        st.metric("Review Complete", completed)
 
     st.divider()
     
@@ -305,7 +346,8 @@ def render_cases_fragment(cases_data):
                                 st.session_state.confirm_delete_id = None
                                 
                                 # Clear our data cache instantly so the dashboard updates without delay
-                                get_cases.clear()
+                                # Cache clear removed for 0-cache performance sync
+                                pass
                                 
                                 st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
                                 st.rerun()
