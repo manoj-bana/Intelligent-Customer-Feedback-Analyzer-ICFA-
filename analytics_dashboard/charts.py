@@ -1,7 +1,6 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.express as px
-from wordcloud import WordCloud
 import pandas as pd
 
 COLOR_MAP = {
@@ -57,14 +56,3 @@ def generate_keyword_frequency_chart(freq_data):
                  color_discrete_sequence=['#17a2b8'])
     fig.update_layout(yaxis={'categoryorder': 'total ascending'})
     st.plotly_chart(fig, use_container_width=True)
-
-def generate_wordcloud(text_data):
-    if not text_data.strip():
-        st.info("No text available for Word Cloud.")
-        return
-    wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis', max_words=100).generate(text_data)
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.imshow(wordcloud, interpolation='bilinear')
-    ax.axis('off')
-    st.markdown("##### Word Cloud")
-    st.pyplot(fig)

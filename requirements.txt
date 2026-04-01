@@ -21,3 +21,5 @@ fpdf2
 python-docx
 openpyxl
 vaderSentiment
+pytest
+

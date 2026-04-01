@@ -40,6 +40,7 @@ def show():
 
     if page == "🏠 Home":
         show_home()
+
     elif page == "☁️ Document Ingestion":
         from frontend.pages import ingestion
         ingestion.show()
@@ -170,27 +171,26 @@ def show_home():
 
     st.divider()
     
-    # --- Stalled Case Management ---
-    pending_cases = [
-        c for c in cases_data 
-        if "Pending Review" in c["review_status"] or "Error" in c["review_status"]
-    ]
+    # --- Case Management (Delete/Retry) ---
+    all_cases = cases_data # Allow management of ALL cases
     
-    if pending_cases:
-        st.subheader("🛠️ Manage Stalled Cases")
-        st.markdown("Resume or remove datasets that may have been interrupted by service restarts.")
+    if all_cases:
+        st.subheader("📁 Manage Case History")
+        st.markdown("Remove old datasets or resume stalled processing to keep your workspace clean.")
         
-        case_lookup = {c['case_id']: c for c in pending_cases}
-        case_mapping = {f"{c['filename']} (ID: {c['case_id']})": c['case_id'] for c in pending_cases}
-        selected_case_label = st.selectbox("Select Case to Manage", list(case_mapping.keys()))
+        case_lookup = {c['case_id']: c for c in all_cases}
+        case_mapping = {f"{c['filename']} (ID: {c['case_id']})": c['case_id'] for c in all_cases}
+        selected_case_label = st.selectbox("Select Case to Manage", list(case_mapping.keys()), key="manage_case_select")
 
         selected_case_id = case_mapping[selected_case_label]
         selected_status = case_lookup[selected_case_id]["review_status"]
         
         if "Error" in selected_status:
             st.error(f"**Reason for failure:** {selected_status}")
+        elif "Completed" in selected_status:
+            st.success(f"**Status:** {selected_status} — Data is ready for reporting.")
         else:
-            st.warning(f"**Status:** {selected_status} — Processing may have stalled.")
+            st.warning(f"**Status:** {selected_status} — Processing may be active or stalled.")
 
         col_act1, col_act2 = st.columns([1, 4])
         with col_act1:

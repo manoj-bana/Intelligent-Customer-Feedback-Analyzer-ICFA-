@@ -50,6 +50,39 @@ def _clean_text_for_keywords(text: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).lower()
     return cleaned
 
+from fuzzywuzzy import process
+
+# High-impact sentiment words for fuzzy correction (derived from VADER's top valence scores)
+SENTIMENT_LEXICON = [
+    "excellent", "amazing", "great", "good", "happy", "love", "best", "awesome", "fantastic", "perfect",
+    "helpful", "fast", "easy", "efficient", "recommend", "brilliant", "wonderful", "outstanding", "superb", "delighted",
+    "terrible", "horrible", "awful", "bad", "hate", "worst", "expensive", "slow", "broken", "useless",
+    "frustrated", "annoyed", "rude", "poor", "difficult", "failed", "waste", "missing", "unhelpful", "disappointed"
+]
+
+def _clean_text_for_sentiment(text: str) -> str:
+    """
+    Generalized cleaning with Fuzzy Lexicon Correction.
+    Detects and fixes OCR typos for high-impact sentiment words.
+    """
+    if not text:
+        return ""
+        
+    words = str(text).lower().split()
+    corrected_words = []
+    
+    for word in words:
+        # Only attempt fuzzy correction on words of a certain length to avoid false positives
+        if len(word) >= 4:
+            # Check if word is already a close match to something in our lexicon
+            match, score = process.extractOne(word, SENTIMENT_LEXICON)
+            if score >= 85: # High confidence threshold
+                corrected_words.append(match)
+                continue
+        corrected_words.append(word)
+        
+    return " ".join(corrected_words)
+
 def analyze_sentiment(text: str) -> dict:
     """
     Analyzes the sentiment of a given string using the VADER model.
@@ -59,8 +92,9 @@ def analyze_sentiment(text: str) -> dict:
         if not text or str(text).strip() == "":
             return {"label": "NEUTRAL", "score": 0.5}
             
+        cleaned_text = _clean_text_for_sentiment(text)
         sia, _ = _get_resources()
-        scores = sia.polarity_scores(str(text))
+        scores = sia.polarity_scores(cleaned_text)
         comp = scores["compound"]
         
         label = "POSITIVE" if comp >= 0.05 else ("NEGATIVE" if comp <= -0.05 else "NEUTRAL")

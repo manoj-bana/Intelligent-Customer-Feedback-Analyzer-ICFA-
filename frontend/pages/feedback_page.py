@@ -4,14 +4,11 @@ import requests
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from wordcloud import WordCloud
-
 from analytics_dashboard.charts import (
     generate_sentiment_bar_chart,
     generate_sentiment_line_chart,
     generate_sentiment_pie_chart,
-    generate_keyword_frequency_chart,
-    generate_wordcloud
+    generate_keyword_frequency_chart
 )
 from analytics_dashboard.data_loader import aggregate_user_data
 from frontend.utils.export_utils import export_to_format
@@ -81,13 +78,31 @@ def show_results(data):
     """
     Renders the analysis results, including metric cards, charts, and detailed keyword data.
     """
-    st.success(f"✅ Analyzed {data['total']} reviews!")
+    st.subheader("📊 Key Performance Indicators")
+    total = data['total']
+    pos_pct = (data['positive'] / total * 100) if total > 0 else 0
+    neg_pct = (data['negative'] / total * 100) if total > 0 else 0
+    nss = pos_pct - neg_pct
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Reviews", total)
+    m2.metric("Positive", f"{pos_pct:.1f}%", delta="Satisfaction", help="Percentage of total reviews evaluated as Positive.")
+    m3.metric("Negative", f"{neg_pct:.1f}%", delta="-Pain Points", delta_color="inverse", help="Percentage of total reviews evaluated as Negative.")
+    m4.metric("Net Sentiment (NSS)", f"{nss:+.1f}", delta="Health Score", delta_color="normal" if nss > 0 else "inverse", help="Net Sentiment Score: Positive % minus Negative %.")
+    
+    with st.expander("📝 Executive Summary & Insights", expanded=True):
+        col_in1, col_in2 = st.columns([2, 1])
+        with col_in1:
+            if nss > 30:
+                st.success(f"🌟 **Strong Performance:** The dataset shows a high NSS of {nss:.1f}. Customers are generally satisfied, particularly with keywords like: '{', '.join([k['word'] for k in data.get('freq_keywords', [])[:3]])}'.")
+            elif nss < 0:
+                st.error(f"⚠️ **Urgent Attention Needed:** The sentiment is leaning negative. Focus on resolving issues related to: '{', '.join([k['word'] for k in data.get('tfidf_keywords', [])[:3]])}'.")
+            else:
+                st.warning(f"⚖️ **Neutral Market Position:** Sentiment is balanced. There is a great opportunity to convert 'Neutral' users by focusing on missing features or service gaps.")
+        with col_in2:
+            st.button("📧 Email PDF Report", use_container_width=True, disabled=True)
+            st.button("🔔 Set Alert for Negative spikes", use_container_width=True, disabled=True)
 
-    # --- Metric Cards ---
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Positive Reviews", data["positive"], delta="High satisfaction", delta_color="normal")
-    m2.metric("Negative Reviews", data["negative"], delta="Improvement areas", delta_color="inverse")
-    m3.metric("Neutral Reviews", data["neutral"])
     st.divider()
 
     # --- Data Preparation ---
@@ -117,7 +132,6 @@ def show_results(data):
         export_data = export_to_format(df_export, export_fmt, title="Customer Feedback Sentiment Report")
         
         with col_btn:
-            st.write("") # Padding
             st.download_button(
                 label=f"⬇️ Download as {export_fmt}",
                 data=export_data,
@@ -138,13 +152,21 @@ def show_results(data):
     st.divider()
 
     # --- User-Level Aggregation ---
-    if df_enriched is not None:
-        st.subheader("👤 Per-User Analysis")
-        agg_df = aggregate_user_data(df_enriched)
-        if agg_df is not None and not agg_df.empty:
-            st.dataframe(agg_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("Insufficient data for user-level aggregation.")
+    user_agg_data = data.get("user_engagement")
+    if user_agg_data or df_enriched is not None:
+        with st.expander("👤 User-Specific Engagement Analysis", expanded=False):
+            st.write("Identifies high-volume contributors and their dominant sentiment profiles.")
+            
+            agg_df = None
+            if user_agg_data:
+                agg_df = pd.DataFrame(user_agg_data)
+            elif df_enriched is not None:
+                agg_df = aggregate_user_data(df_enriched)
+            
+            if agg_df is not None and not agg_df.empty:
+                st.dataframe(agg_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("User-level data (IDs) not identified in this dataset.")
         st.divider()
 
     # --- Keyword Discovery ---
@@ -197,8 +219,7 @@ def render_visualizations(data, df_to_plot):
         "Sentiment Distribution (Bar)", 
         "Sentiment Proportions (Pie)", 
         "Keyword Frequency Report", 
-        "Sentiment Trend Analysis", 
-        "Visual Word Cloud"
+        "Sentiment Trend Analysis"
     ]
     selected_chart = st.selectbox("Select View", chart_opts, key="viz_selector")
     
@@ -212,11 +233,8 @@ def render_visualizations(data, df_to_plot):
             render_freq_chart(data)
                 
         st.write("")
-        c4, c5 = st.columns(2)
-        with c4:
-            generate_sentiment_line_chart(df_to_plot)
-        with c5:
-            render_wordcloud_chart(df_to_plot)
+        st.write("#### Sentiment Trend Analysis")
+        generate_sentiment_line_chart(df_to_plot)
                 
     elif selected_chart == "Sentiment Distribution (Bar)":
         generate_sentiment_bar_chart(df_to_plot)
@@ -226,8 +244,6 @@ def render_visualizations(data, df_to_plot):
         render_freq_chart(data)
     elif selected_chart == "Sentiment Trend Analysis":
         generate_sentiment_line_chart(df_to_plot)
-    elif selected_chart == "Visual Word Cloud":
-        render_wordcloud_chart(df_to_plot)
 
 def render_freq_chart(data):
     """Helper to render frequency chart from results data."""
@@ -238,66 +254,60 @@ def render_freq_chart(data):
     else:
         st.info("No frequency keywords available.")
 
-def render_wordcloud_chart(df):
-    """Helper to render wordcloud from dataframe text."""
-    all_text = " ".join(df.get('feedback_text', pd.Series([])).dropna().astype(str))
-    if all_text:
-        generate_wordcloud(all_text)
-    else:
-        st.info("No text available for word cloud.")
 
 def render_keyword_tabs(data):
     """
-    Renders the detailed keyword extraction tabs.
+    Renders the keyword extraction. Consolidates redundant technical views into a clean layout.
     """
-    st.subheader("🔑 Keyword Extraction")
-    tab_freq, tab_tfidf = st.tabs(["📊 Frequency Count", "📐 TF-IDF Scoring"])
-
-    with tab_freq:
-        st.caption("Common terms ranked by raw frequency across the dataset.")
+    st.subheader("🔑 Voice of the Customer (Themes)")
+    
+    col_k1, col_k2 = st.columns(2)
+    with col_k1:
+        st.write("**Top Mentioned Topics**")
         freq_kw = data.get("freq_keywords") or data.get("keywords", [])
         if freq_kw:
-            freq_df = pd.DataFrame(freq_kw)[["word", "count"]]
-            st.dataframe(freq_df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(freq_kw)[["word", "count"]], use_container_width=True, hide_index=True)
         else:
-            st.info("Frequency data unavailable.")
+            st.info("No frequency data.")
 
-    with tab_tfidf:
-        st.caption("Terms ranked by TF-IDF scoring, highlighting uniquely significant words.")
+    with col_k2:
+        st.write("**Unique Sentiment Drivers (TF-IDF)**")
         tfidf_kw = data.get("tfidf_keywords", [])
         if tfidf_kw:
-            tfidf_df = pd.DataFrame(tfidf_kw)[["word", "score"]]
-            st.dataframe(tfidf_df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(tfidf_kw)[["word", "score"]], use_container_width=True, hide_index=True)
         else:
-            st.info("TF-IDF data unavailable.")
+            st.info("No TF-IDF data.")
 
 def render_results_table(data):
     """
-    Renders the fully searchable and sortable results table.
+    Renders an action-oriented results table focusing on outliers.
     """
-    st.subheader("📋 Raw Data Review")
+    st.subheader("📋 Critical Review Feed")
+    st.caption("Focus on reviews with high confidence scores to identify core issues or success stories.")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        sentiment_filter = st.selectbox(
-            "Filter by Sentiment",
-            ["All", "Positive", "Negative", "Neutral"],
-            key="sentiment_filter"
-        )
-    with col2:
-        sort_order = st.selectbox(
-            "Sort by Score",
-            ["Descending (High to Low)", "Ascending (Low to High)"],
-            key="sort_order"
-        )
+    res_df = pd.DataFrame(data["results"])
 
-    res_df_display = pd.DataFrame(data["results"])
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        sentiment_filter = st.selectbox("Priority Filter", ["All", "Positive", "Negative", "Neutral"], key="prio_filter")
+    with c2:
+        view_mode = st.radio("View Mode", ["Top 50 Outliers", "All Matching"], horizontal=True, key="view_mode")
 
     if sentiment_filter != "All":
-        res_df_display = res_df_display[res_df_display["label"] == sentiment_filter.upper()]
+        res_df = res_df[res_df["label"] == sentiment_filter.upper()]
 
-    if 'score' in res_df_display.columns:
-        ascending = (sort_order == "Ascending (Low to High)")
-        res_df_display = res_df_display.sort_values("score", ascending=ascending)
+    if 'score' in res_df.columns:
+        res_df = res_df.sort_values("score", ascending=False)
 
-    st.dataframe(res_df_display, use_container_width=True, hide_index=True)
+    display_df = res_df.head(50) if view_mode == "Top 50 Outliers" else res_df
+
+    st.dataframe(
+        display_df, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "review": st.column_config.TextColumn("Customer Review", width="large"),
+            "label": st.column_config.TextColumn("Sentiment"),
+            "score": st.column_config.NumberColumn("Confidence")
+        }
+    )
