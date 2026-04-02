@@ -2,6 +2,14 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from jose import jwt
 import datetime
+
+import re
+import secrets
+import bcrypt
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+from jose import jwt
+import datetime
 import re
 import secrets
 import bcrypt

@@ -8,15 +8,47 @@ def show():
     """
     Main entry point for the dashboard. Handles sidebar navigation and page routing.
     """
-    st.sidebar.title(f"👤 {st.session_state.username}")
+    username = st.session_state.get("username", "")
+
+    # fetch role
+    role = "user"
+    if "role" not in st.session_state:
+        try:
+            role_res = requests.get(f"{API_URL}/admin/check-role/{username}", timeout=5)
+            if role_res.status_code == 200:
+                role = role_res.json().get("role", "user")
+                st.session_state.role = role
+        except:
+            pass
+    else:
+        role = st.session_state.role
+
+    is_admin = role == "admin"
+    
+    if is_admin:
+        badge = "Admin"
+        icon = "🔵"
+        bg_color = "#2563eb"
+    else:
+        badge = "User"
+        icon = "🟢"
+        bg_color = "#16a34a"
+        
+    st.sidebar.markdown(f"### 👤 {username} <span style='font-size:14px; padding:2px 6px; border-radius:10px; background-color:{bg_color}; color:white;'>{icon} {badge}</span>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
     # Handle page persistence in query params
     pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
+    if is_admin:
+        pages.append("🛡️ Admin Access")
+    else:
+        pages.append("🛡️ Admin Request")
+
     query_page = st.query_params.get("page", "🏠 Home")
-    page_index = 0
-    if query_page in pages:
-        page_index = pages.index(query_page)
+    if query_page not in pages:
+        query_page = "🏠 Home"
+    
+    page_index = pages.index(query_page)
 
     page = st.sidebar.radio(
         "Navigate",
@@ -32,6 +64,7 @@ def show():
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.session_state.token = ""
+        st.session_state.pop("role", None)
         
         # Clear query params to prevent auto-login on refresh
         st.query_params.clear()
@@ -53,6 +86,9 @@ def show():
         with tab2:
             from frontend.pages import churn_page
             churn_page.show()
+    elif page == "🛡️ Admin Access" or page == "🛡️ Admin Request":
+        from frontend.pages import admin_requests
+        admin_requests.show()
 
 def show_home():
     """
@@ -66,7 +102,11 @@ def show_home():
 
     # --- Data Fetching ---
     try:
-        res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
+        is_admin = st.session_state.get("role") == "admin"
+        if is_admin:
+            res = requests.get(f"{API_URL}/admin/cases?manager_username={username}", timeout=10)
+        else:
+            res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
         cases_data = res.json().get("cases", []) if res.status_code == 200 else []
     except Exception:
         cases_data = []

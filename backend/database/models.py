@@ -40,6 +40,31 @@ class Dataset(Base):
         default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     )
 
+class UserRole(Base):
+    """
+    Model for extending user functionality with roles without modifying the core users table.
+    """
+    __tablename__ = "user_roles"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True)
+    role = Column(String, default="user")
+
+class AdminRequest(Base):
+    """
+    Model for users requesting admin privileges.
+    """
+    __tablename__ = "admin_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    reason = Column(String)
+    status = Column(String, default="pending")  # pending, approved, rejected
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
+
 class Feedback(Base):
     """
     Model for individual customer feedback entries and their analyzed sentiment.
