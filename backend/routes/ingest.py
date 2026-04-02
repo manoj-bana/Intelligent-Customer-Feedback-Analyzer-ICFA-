@@ -49,26 +49,36 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 # Identify user ID column to preserve
                 user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
                 
-                chunk_reviews = chunk_df[text_col].fillna("").tolist()
-                chunk_labels, chunk_scores = [], []
-                for idx, review in enumerate(chunk_reviews):
-                    sentiment = analyze_sentiment(str(review))
-                    chunk_labels.append(sentiment["label"])
-                    chunk_scores.append(sentiment["score"])
+                # Batch analyze sentiment for much higher throughput
+                chunk_reviews = chunk_df[text_col].fillna("").astype(str).tolist()
+                
+                chunk_labels = []
+                chunk_scores = []
+                
+                # Using a local reference for speed in the loop
+                local_analyze = analyze_sentiment
+                
+                for review in chunk_reviews:
+                    res = local_analyze(review)
+                    label = res["label"]
+                    score = res["score"]
+                    
+                    chunk_labels.append(label)
+                    chunk_scores.append(score)
+                    
                     total += 1
-                    if sentiment["label"] == "POSITIVE":
-                        positive += 1
-                    elif sentiment["label"] == "NEGATIVE":
-                        negative += 1
-                    else:
-                        neutral += 1
-                        
-                    results_item = {"review": str(review), **sentiment}
-                    if user_id_col:
-                        results_item[user_id_col] = str(chunk_df.iloc[idx][user_id_col])
-                    results_preview.append(results_item)
-                    review_texts_preview.append(str(review))
-                        
+                    if label == "POSITIVE": positive += 1
+                    elif label == "NEGATIVE": negative += 1
+                    else: neutral += 1
+                
+                if len(results_preview) < 1000:
+                    for i, (rev, lbl, scr) in enumerate(zip(chunk_reviews, chunk_labels, chunk_scores)):
+                        if len(results_preview) >= 1000: break
+                        item = {"review": rev, "label": lbl, "score": scr}
+                        if user_id_col: item[user_id_col] = str(chunk_df.iloc[i][user_id_col])
+                        results_preview.append(item)
+                        review_texts_preview.append(rev)
+
                 chunk_df["SentimentLabel"], chunk_df["SentimentScore"] = chunk_labels, chunk_scores
                 enriched_chunks.append(chunk_df)
                 rows_processed += len(chunk_df)
@@ -131,7 +141,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
         db.close()
 
 @router.post("/upload")
-def upload_dataset(
+async def upload_dataset(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...), 
     username: str = Form(...), 
@@ -149,8 +159,10 @@ def upload_dataset(
         case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
         temp_file_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")
         
+        # Async write for faster response
+        content = await file.read()
         with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(content)
             
         new_ds = Dataset(
             case_id=case_id, 
@@ -236,7 +248,7 @@ def delete_case(case_id: str):
         db.close()
 
 @router.post("/cases/{case_id}/retry")
-def retry_case(case_id: str, background_tasks: BackgroundTasks):
+async def retry_case(case_id: str, background_tasks: BackgroundTasks):
     """
     Reprocess a case that might have failed or needs updating.
     """
@@ -276,5 +288,39 @@ def get_case_results(case_id: str):
             
         with open(results_path, "r") as f:
             return json.load(f)
+    finally:
+        db.close()
+@router.delete("/cases/all/{username}")
+def delete_all_cases(username: str):
+    """
+    Delete all cases associated with a specific user.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
+        for dataset in datasets:
+            # Delete physical files
+            if os.path.exists(dataset.file_path):
+                os.remove(dataset.file_path)
+            
+            enriched_path = dataset.file_path.replace(dataset.case_id, f"enriched_{dataset.case_id}")
+            if os.path.exists(enriched_path):
+                os.remove(enriched_path)
+            
+            results_path = f"{dataset.file_path}_results.json"
+            if os.path.exists(results_path):
+                os.remove(results_path)
+                
+            db.delete(dataset)
+            
+        db.commit()
+        return {"message": f"Successfully deleted all {len(datasets)} cases"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()

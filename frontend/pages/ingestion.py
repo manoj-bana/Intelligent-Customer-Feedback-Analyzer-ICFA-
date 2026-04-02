@@ -80,6 +80,9 @@ def handle_upload(uploaded_file, task_type):
     """
     Internal helper to handle the file upload request to the backend.
     """
+    # Ensure the file pointer is at the beginning
+    uploaded_file.seek(0)
+    
     with st.spinner("Uploading dataset for background processing..."):
         try:
             username = st.session_state.get("username", "")
@@ -118,6 +121,10 @@ def handle_upload(uploaded_file, task_type):
                     "The dataset is now in the **Pending Review** queue and will be "
                     "analyzed in the background. Check your Home dashboard for status updates."
                 )
+                
+                # Reset file uploader by clearing its state if possible
+                # Or simply inform the user to select another file
+                st.session_state["file_processed"] = True
             else:
                 st.error(f"Ingestion failed: {response.text}")
                 
