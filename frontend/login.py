@@ -195,6 +195,13 @@ def render_password_reset_flow():
 
         confirm_pass = st.text_input("Confirm New Password", type="password", key="reset_pass2")
         
+        # Match Indicator
+        if confirm_pass:
+            if new_pass == confirm_pass:
+                st.markdown('<p class="inline-msg check-valid">✓ Passwords match</p>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<p class="inline-msg check-invalid">⚠ {ERROR_MESSAGES["PASSWORD_MISMATCH"]}</p>', unsafe_allow_html=True)
+        
         if st.button("Update Password", type="primary", width='stretch'):
             if not all(r[0] for r in rules):
                 st.error(f"❌ {ERROR_MESSAGES['PASSWORD_REQUIREMENTS']}")

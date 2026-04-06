@@ -318,6 +318,48 @@ def delete_case(case_id: str):
         db.close()
 
 
+@router.delete("/cases/all/{username}")
+def delete_all_cases(username: str):
+    """
+    Delete all cases and their associated files for a specific user.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
+        
+        for dataset in datasets:
+            try:
+                if os.path.exists(dataset.file_path):
+                    os.remove(dataset.file_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {dataset.file_path}: {e}")
+
+            enriched_path = dataset.file_path.replace(dataset.case_id, f"enriched_{dataset.case_id}")
+            try:
+                if os.path.exists(enriched_path):
+                    os.remove(enriched_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {enriched_path}: {e}")
+
+            results_path = f"{dataset.file_path}_results.json"
+            try:
+                if os.path.exists(results_path):
+                    os.remove(results_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {results_path}: {e}")
+
+            db.delete(dataset)
+            
+        db.commit()
+        return {"message": "All cases deleted"}
+    finally:
+        db.close()
+
+
 @router.post("/cases/{case_id}/retry")
 async def retry_case(case_id: str, background_tasks: BackgroundTasks):
     """
