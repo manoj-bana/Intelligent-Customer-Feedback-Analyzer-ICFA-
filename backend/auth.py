@@ -12,8 +12,6 @@ router = APIRouter()
 SECRET_KEY = "icfa_secret_key"
 ALGORITHM = "HS256"
 
-# --- Utility Functions for Hashing ---
-
 def hash_password(password: str) -> str:
     """Securely hash a password using bcrypt."""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -44,8 +42,6 @@ def verify_answer(plain_answer: str, hashed_answer: str) -> bool:
     except Exception:
         return False
 
-# --- Request Models ---
-
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -67,7 +63,7 @@ class ChangePasswordRequest(BaseModel):
 
 @router.get("/check-username")
 def check_username(username: str = Query(...)):
-    """Check if a username is already taken."""
+    """Validates if a username profile exists."""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()

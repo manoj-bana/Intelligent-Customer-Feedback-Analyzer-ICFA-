@@ -24,14 +24,20 @@ wheels/
 # Virtual Environment
 venv/
 ENV/
+.vscode/
 
 # Database
 icfa.db
 *.sqlite3
 
 # Project Specific
-uploads/
-data/
+uploads/*
+!uploads/.gitkeep
+!uploads/temp/
+uploads/temp/*
+!uploads/temp/.gitkeep
+data/*.csv 
 .pytest_cache/
 .streamlit/
-scripts/__pycache__/
+*.pkl
+uploads/*.json

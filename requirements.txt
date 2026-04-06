@@ -22,3 +22,4 @@ python-docx
 openpyxl
 vaderSentiment
 pytest
+

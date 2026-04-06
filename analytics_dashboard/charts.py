@@ -1,7 +1,6 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.express as px
-from wordcloud import WordCloud
 import pandas as pd
 import io
 
@@ -86,27 +85,8 @@ def generate_keyword_frequency_chart(freq_data):
     if not freq_data:
         st.info("No keywords available.")
         return
-    fig = _build_keyword_chart(tuple(freq_data))
-    st.plotly_chart(fig, width='stretch')
-
-@st.cache_data
-def _build_wordcloud_image(text_data):
-    """Cached: generates wordcloud as PNG bytes."""
-    wordcloud = WordCloud(width=800, height=400, background_color='white', colormap='viridis', max_words=100).generate(text_data)
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.imshow(wordcloud, interpolation='bilinear')
-    ax.axis('off')
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-def generate_wordcloud(text_data):
-    if not text_data.strip():
-        st.info("No text available for Word Cloud.")
-        return
-    # Only pass first 50k chars to avoid hashing huge strings
-    img_bytes = _build_wordcloud_image(text_data[:50000])
-    st.markdown("##### Word Cloud")
-    st.image(img_bytes, width='stretch')
+    df_kw = pd.DataFrame(freq_data, columns=['Keyword', 'Frequency'])
+    fig = px.bar(df_kw, x='Frequency', y='Keyword', orientation='h', title='Top 10 Keywords',
+                 color_discrete_sequence=['#17a2b8'])
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'})
+    st.plotly_chart(fig, use_container_width=True)
