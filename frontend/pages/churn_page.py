@@ -25,7 +25,7 @@ def show():
     Synchronized with live results via 5s polling.
     """
     # Silent 5s heartbeat to catch new background report completions
-    st_autorefresh(interval=5000, key="report_churn_page_sync")
+    # st_autorefresh(interval=5000, key="report_churn_page_sync")
     
     st.title("📉 Churn Prediction")
     st.markdown("Select an ingested dataset to view the churn prediction report.")

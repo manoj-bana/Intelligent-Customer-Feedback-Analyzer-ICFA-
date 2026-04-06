@@ -74,16 +74,68 @@ def show():
     username = st.session_state.get("username", "User")
     
     # Silent 5s heartbeat for zero-cache live status updates
-    st_autorefresh(interval=5000, key="master_dash_sync")
+    # st_autorefresh(interval=5000, key="master_dash_sync")
+
+    # Fetch notifications early for sidebar badges
+    all_notifs = get_notifications(username)
+    unread_notifs = [n for n in all_notifs if n["is_read"] == 0]
+    query_page = st.query_params.get("page", "🏠 Home")
+    role = st.session_state.get("role", "user")
+
+    # --- Sidebar UI Navigation Hub ---
+    def nav_link(label, page_name, current_page, is_indented=False):
+        is_active = (current_page == page_name)
+        prefix = "&nbsp;&nbsp;" if is_indented else ""
+        btn_label = f"{prefix}{label}"
+        
+        # Use a more compact styling for links
+        cols = st.sidebar.columns([12, 1])
+        with cols[0]:
+            if st.button(btn_label, use_container_width=True, type="primary" if is_active else "secondary", key=f"nav_{page_name}"):
+                st.query_params["page"] = page_name
+                st.rerun()
 
     # --- Sidebar UI ---
-    st.sidebar.markdown(f"### 👤 {username}")
-    if st.sidebar.button("👤 Manage Profile", key="btn_sidebar_profile", use_container_width=True):
-        st.query_params["page"] = "👤 Manage Profile"
+    st.sidebar.markdown(f"<div style='text-align: center; padding-bottom: 10px;'><h3>👤 {username}</h3><p style='font-size:0.8rem; color:gray; margin-top:-15px;'>{role.capitalize()} • Online</p></div>", unsafe_allow_html=True)
+    nav_link("⚙️ Manage Profile", "👤 Manage Profile", query_page)
+    st.sidebar.divider()
+
+    # Collapsible Navigate Section
+    with st.sidebar.expander("📌 Navigate", expanded=(query_page in ["🏠 Home", "📄 Upload Feedback", "📊 Upload Churn Data"])):
+        nav_link("🏠 Home", "🏠 Home", query_page)
+        nav_link("📄 Feedbacks", "📄 Upload Feedback", query_page)
+        nav_link("📊 Churn", "📊 Upload Churn Data", query_page)
+
+    # Collapsible Analytics Section
+    with st.sidebar.expander("📊 Analytics", expanded=(query_page in ["💬 Sentiment Dashboard", "📉 Churn Insights", "🔑 Keyword Analysis", "📈 Trends (NEW)"])):
+        nav_link("💬 Sentiment", "💬 Sentiment Dashboard", query_page)
+        nav_link("📉 Churn", "📉 Churn Insights", query_page)
+        nav_link("🔑 Keywords", "🔑 Keyword Analysis", query_page)
+        nav_link("📈 Trends", "📈 Trends (NEW)", query_page)
+
+    # Collapsible Management Section
+    with st.sidebar.expander("📂 Management", expanded=(query_page in ["📁 Upload History (NEW)", "📋 My Reports"])):
+        nav_link("📁 History", "📁 Upload History (NEW)", query_page)
+        nav_link("📋 Reports", "📋 My Reports", query_page)
+
+    # Collapsible System Options (Admin Only)
+    if role == "admin":
+        with st.sidebar.expander("👑 Admin Control", expanded=(query_page in ["👑 Admin Panel", "👥 Manage Users"])):
+            nav_link("👑 Panel", "👑 Admin Panel", query_page)
+            nav_link("👥 Users", "👥 Manage Users", query_page)
+
+    # Settings at Bottom
+    st.sidebar.markdown("<div style='height: 10vh;'></div>", unsafe_allow_html=True)
+    st.sidebar.divider()
+    dark_mode = st.sidebar.toggle("🌙 Dark Mode")
+    if dark_mode: st.session_state.theme = "dark"
+    else: st.session_state.theme = "light"
+    
+    if st.sidebar.button("🚪 Logout", type="primary", use_container_width=True):
+        st.session_state.logged_in = False
+        st.query_params.clear()
         st.rerun()
 
-    st.sidebar.markdown("---")
-    
     # Reuse CSS patterns from login/register for consistency
     st.markdown("""
         <style>
@@ -93,66 +145,107 @@ def show():
         .check-valid { color: #059669; }
         .check-invalid { color: #dc2626; }
         .inline-msg { font-size: 0.8rem; margin-top: -15px; margin-bottom: 10px; }
+        
+        /* Make sidebar buttons hyper-compact to prevent scrolling */
+        [data-testid="stSidebar"] button {
+            padding: 0.25rem 0.5rem !important;
+            min-height: 2rem !important;
+            margin-bottom: -5px !important;
+        }
+        [data-testid="stSidebar"] button[kind="secondary"] {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+        }
+        /* Reduce vertical space for headers/dividers */
+        [data-testid="stSidebar"] hr {
+            margin: 0.5em 0px !important;
+        }
+        [data-testid="stSidebar"] h4 {
+            padding-top: 0.2rem !important;
+            padding-bottom: 0rem !important;
+        }
+        /* Shrink container paddings */
+        [data-testid="stSidebar"] [data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 0.5rem !important;
+        }
+        """ + (
+        """
+        /* Sidebar Dark Mode Injection */
+        [data-testid="stSidebar"] {
+            background-color: #111827 !important;
+            color: white !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] div,
+        [data-testid="stSidebar"] h3, 
+        [data-testid="stSidebar"] h4,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] p {
+            color: #f3f4f6 !important;
+        }
+        [data-testid="stSidebar"] button[kind="secondary"] {
+            color: #d1d5db !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] {
+            background-color: #1f2937 !important;
+            border-color: #374151 !important;
+        }
+        """ if st.session_state.get("theme") == "dark" else "") + """
         </style>
     """, unsafe_allow_html=True)
 
-    pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
-    query_page = st.query_params.get("page", "🏠 Home")
-    is_profile_page = (query_page == "👤 Manage Profile")
-    
-    page_index = pages.index(query_page) if query_page in pages else 0
-    page = st.sidebar.radio("Navigate", pages, index=page_index if not is_profile_page else 0)
-    
-    # Detect navigation changes
-    if st.query_params.get("page") != page and not is_profile_page:
-        st.query_params["page"] = page
-        st.rerun()
-    elif is_profile_page and page != pages[0] and page in pages:
-        st.query_params["page"] = page
-        st.rerun()
+    @st.fragment(run_every=4)
+    def render_notification_center(username_val):
+        all_notifs_local = get_notifications(username_val)
+        unread_notifs_local = [n for n in all_notifs_local if n["is_read"] == 0]
 
-    if st.sidebar.button("🚪 Logout"):
-        st.session_state.logged_in = False
-        st.query_params.clear()
-        st.rerun()
+        # Toast alerts for fresh high-priority notifications
+        if "last_notif_ids" not in st.session_state: st.session_state.last_notif_ids = set()
+        for n in unread_notifs_local:
+            if n["id"] not in st.session_state.last_notif_ids:
+                st.toast(n["message"], icon="🔔")
+                st.session_state.last_notif_ids.add(n["id"])
 
-    # --- Global Alerts & Notifications ---
-    all_notifs = get_notifications(username)
-    unread_notifs = [n for n in all_notifs if n["is_read"] == 0]
-    
-    # Toast alerts for fresh high-priority notifications
-    if "last_notif_ids" not in st.session_state: st.session_state.last_notif_ids = set()
-    for n in unread_notifs:
-        if n["id"] not in st.session_state.last_notif_ids:
-            st.toast(n["message"], icon="🔔")
-            st.session_state.last_notif_ids.add(n["id"])
-
-    # Header with Notification Center
-    h_col1, h_col2 = st.columns([10, 2])
-    with h_col2:
-        notif_label = f"🔔 {len(unread_notifs)}" if unread_notifs else "🔔"
+        notif_label = f"🔔 {len(unread_notifs_local)}" if unread_notifs_local else "🔔"
         with st.popover(notif_label, use_container_width=True):
             st.markdown("### 📥 System Updates")
-            if not all_notifs: st.info("No activity yet.")
+            if not all_notifs_local: st.info("No activity yet.")
             else:
-                for i, n in enumerate(all_notifs[:8]):
+                for i, n in enumerate(all_notifs_local[:8]):
                     style = "**(New)**" if n["is_read"] == 0 else ""
                     cn, cv = st.columns([4, 1.2])
                     with cn: st.markdown(f"{style} {n['message']}\n<small>{n['created_at']}</small>", unsafe_allow_html=True)
                     with cv:
                         if n["is_read"] == 0:
                             if st.button("✓", key=f"rd_{n['id']}_{i}"):
-                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun()
+                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun(scope="fragment")
                                 except: pass
                 st.divider()
                 st.caption("Latest events shown.")
 
+    # Header with Notification Center
+    h_col1, h_col2 = st.columns([10, 2])
+    with h_col2:
+        render_notification_center(username)
+
+    is_profile_page = (query_page == "👤 Manage Profile")
     if is_profile_page: show_profile_management()
-    elif page == "🏠 Home": show_home()
-    elif page == "☁️ Document Ingestion":
+    # Ingest routes (Groups all new upload navigation shortcuts to ingestion page)
+    elif query_page in ["☁️ Document Ingestion", "📄 Upload Feedback", "📊 Upload Churn Data", "📁 Upload History (NEW)"]:
         from frontend.pages import ingestion
         ingestion.show()
-    elif page == "📊 Reports": show_reports_tab()
+    # Analytics & Reports routes (Groups all analytical pages to reports hub)
+    elif query_page in ["📊 Reports", "📋 My Reports", "💬 Sentiment Dashboard", "📉 Churn Insights", "🔑 Keyword Analysis", "📈 Trends (NEW)"]:
+        show_reports_tab()
+    # Notification & Admin routes
+    elif query_page == "🔔 Notifications":
+        st.title("🔔 Notifications Center")
+        st.info("Check back soon for advanced real-time alerts. Use the bell icon at the top right for now.")
+    elif query_page in ["👑 Admin Panel", "👥 Manage Users"]:
+        st.title(query_page)
+        st.warning("Admin UI module not fully implemented yet. Please manage users directly via the backend database.")
+    # Default
+    else: show_home()
 
 def show_home():
     """
@@ -162,6 +255,12 @@ def show_home():
     st.title("📊 ICFA Analytics Master")
     st.markdown(f"**Welcome back,** {username} 👋")
 
+    # Call the isolated auto-refreshing fragment
+    render_live_home_metrics(username)
+
+@st.fragment(run_every=5)
+def render_live_home_metrics(username):
+    # Fetch live data internally so the numbers ACTUALLY update across polling!
     cases_data = get_cases(username)
     total_datasets = len(cases_data)
     pending = len([c for c in cases_data if str(c.get("review_status")).lower() == "pending"])
@@ -177,6 +276,18 @@ def show_home():
     with k3: render_kpi_card("Processing", processing, "🔄", "grad-processing", "Live analysis...")
     with k4: render_kpi_card("Completed", completed, "✅", "grad-completed", "Ready for review")
     
+    st.markdown("---")
+    
+    # Insights Section moved from Sidebar for better readability
+    with st.container(border=True):
+        c_i1, c_i2 = st.columns([1, 4])
+        with c_i1:
+            st.markdown("<h2 style='margin:0;'>💡</h2>", unsafe_allow_html=True)
+        with c_i2:
+            st.subheader("Intelligence Snapshot")
+            st.markdown("⭐ **Satisfaction High:** Most analyzed customer feedback remains positive.")
+            st.markdown("⚠️ **Operational Alert:** Recent reports suggest minor delays in logistics/shipping.")
+
     st.markdown("---")
     render_cases_fragment(cases_data)
 
@@ -330,7 +441,17 @@ def render_cases_fragment(cases_data):
         else:
             c3.caption(status.capitalize())
             
-        c4.caption(c.get("created_date", "N/A"))
+        date_str = c.get("created_date", "N/A")
+        try:
+            import datetime
+            dt = datetime.datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+            dt_utc = dt.replace(tzinfo=datetime.timezone.utc)
+            dt_local = dt_utc.astimezone()
+            date_str = dt_local.strftime('%d %b, %I:%M %p')
+        except Exception:
+            pass
+            
+        c4.caption(date_str)
         
         if status == "completed":
             if c5.button("📊 Open", key=f"view_dash_{c['case_id']}_{i}", use_container_width=True):

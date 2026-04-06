@@ -74,7 +74,7 @@ def show():
     Synchronized with live results via 5s polling.
     """
     # Silent 5s heartbeat to catch new background report completions
-    st_autorefresh(interval=5000, key="report_page_live_sync")
+    # st_autorefresh(interval=5000, key="report_page_live_sync")
     
     st.title("💬 Sentiment Analysis")
     st.markdown("Select an ingested dataset to view the sentiment analysis report.")
@@ -155,11 +155,21 @@ def show():
                 st.error(f"Processing error: {e}")
 
     if "analysis_results" in st.session_state:
+        # Self-healing data restoration
+        df_enriched = st.session_state.get("processed_enriched_df")
+        agg_df = st.session_state.get("processed_agg_df")
+        
+        if agg_df is None and df_enriched is not None:
+            # Recompute it safely if it got dropped from session_state
+            agg_df = get_cached_aggregation(df_enriched)
+            if agg_df is not None:
+                st.session_state.processed_agg_df = agg_df
+                
         show_results(
             st.session_state.analysis_results,
             st.session_state.get("processed_results_df"),
-            st.session_state.get("processed_enriched_df"),
-            st.session_state.get("processed_agg_df")
+            df_enriched,
+            agg_df
         )
 
 def show_results(data, results_df, df_enriched, agg_df):
