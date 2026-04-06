@@ -8,11 +8,17 @@ def show():
     """
     Main entry point for the dashboard. Handles sidebar navigation and page routing.
     """
-    st.sidebar.title(f"👤 {st.session_state.username}")
+    if st.session_state.get("role") == "admin":
+        st.sidebar.title(f"👑 {st.session_state.username} (Admin)")
+    else:
+        st.sidebar.title(f"👤 {st.session_state.username}")
     st.sidebar.markdown("---")
 
     # Handle page persistence in query params
     pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
+    if st.session_state.get("role") == "admin":
+        pages.append("👥 User Management")
+        
     query_page = st.query_params.get("page", "🏠 Home")
     page_index = 0
     if query_page in pages:
@@ -32,6 +38,7 @@ def show():
         st.session_state.logged_in = False
         st.session_state.username = ""
         st.session_state.token = ""
+        st.session_state.role = "user"
         
         # Clear query params to prevent auto-login on refresh
         st.query_params.clear()
@@ -40,7 +47,6 @@ def show():
 
     if page == "🏠 Home":
         show_home()
-
     elif page == "☁️ Document Ingestion":
         from frontend.pages import ingestion
         ingestion.show()
@@ -54,6 +60,9 @@ def show():
         with tab2:
             from frontend.pages import churn_page
             churn_page.show()
+    elif page == "👥 User Management":
+        from frontend.pages import admin_users
+        admin_users.show()
 
 @st.cache_data(ttl=60) # Cache for 60 seconds to allow for new uploads
 def get_cases(username):
@@ -134,7 +143,10 @@ def render_cases_fragment(cases_data):
     Renders the cases list in an isolated fragment for high-speed pagination.
     Only this block reruns when navigating between pages.
     """
-    st.subheader("My Cases")
+    if st.session_state.get("role") == "admin":
+        st.subheader("All System Cases (Admin View)")
+    else:
+        st.subheader("My Cases")
     
     if not cases_data:
         st.info("No cases found. Navigate to `Document Ingestion` to upload your first dataset!")

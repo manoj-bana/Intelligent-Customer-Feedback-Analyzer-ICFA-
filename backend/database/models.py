@@ -14,6 +14,7 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True)
     password = Column(String)
+    role = Column(String, default="user")
     security_question = Column(String, nullable=True)
     security_answer_hash = Column(String, nullable=True)
     reset_token = Column(String, nullable=True)

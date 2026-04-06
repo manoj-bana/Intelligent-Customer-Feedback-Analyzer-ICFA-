@@ -30,3 +30,12 @@ def get_db():
 
 # Ensure tables exist at startup
 Base.metadata.create_all(bind=engine)
+
+# Seamless migration for existing SQLite DB
+try:
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'user'"))
+except Exception:
+    # Column likely already exists
+    pass

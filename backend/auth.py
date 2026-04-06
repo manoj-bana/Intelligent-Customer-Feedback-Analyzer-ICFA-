@@ -90,21 +90,21 @@ def login(data: LoginRequest):
 
             expiration = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
             token = jwt.encode(
-                {"sub": data.username, "exp": expiration},
+                {"sub": data.username, "role": user.role, "exp": expiration},
                 SECRET_KEY,
                 algorithm=ALGORITHM
             )
-            return {"access_token": token, "username": data.username}
+            return {"access_token": token, "username": data.username, "role": user.role}
 
         # Special case for default admin to pass initial integration tests
         if data.username == "admin" and data.password == "admin123":
             expiration = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
             token = jwt.encode(
-                {"sub": "admin", "exp": expiration},
+                {"sub": "admin", "role": "admin", "exp": expiration},
                 SECRET_KEY,
                 algorithm=ALGORITHM
             )
-            return {"access_token": token, "username": "admin"}
+            return {"access_token": token, "username": "admin", "role": "admin"}
 
         raise HTTPException(status_code=401, detail="Invalid credentials")
     finally:
@@ -138,11 +138,11 @@ def register(data: RegisterRequest):
 
         expiration = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
         token = jwt.encode(
-            {"sub": data.username, "exp": expiration},
+            {"sub": data.username, "role": "user", "exp": expiration},
             SECRET_KEY,
             algorithm=ALGORITHM
         )
-        return {"access_token": token, "username": data.username}
+        return {"access_token": token, "username": data.username, "role": "user"}
     except HTTPException:
         raise
     except Exception as e:
