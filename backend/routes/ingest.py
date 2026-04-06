@@ -1,7 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from pydantic import BaseModel
 import pandas as pd
 import os
 import io
+import time
 import uuid
 import shutil
 import json
@@ -14,7 +16,116 @@ from backend.utils.churn_model import predict_churn
 
 router = APIRouter()
 UPLOAD_DIR = "uploads"
+TEMP_DIR = os.path.join(UPLOAD_DIR, "temp")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/upload")
+async def upload_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    username: str = Form(...),
+    task_type: str = Form(...)
+):
+    """
+    Main ingestion endpoint. Handles file storage and spawns the background worker.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        case_id = str(uuid.uuid4())[:8]
+        file_ext = file.filename.rsplit(".", 1)[-1].lower()
+        file_name = f"{case_id}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        new_dataset = Dataset(
+            case_id=case_id,
+            user_id=user.id,
+            filename=file.filename,
+            file_path=file_path,
+            task_type=task_type,
+            review_status="pending"
+        )
+        db.add(new_dataset)
+        db.commit()
+        db.refresh(new_dataset)
+
+        # Notify user instantly that processing has started
+        create_notification(db, user.id, f"Processing started: {file.filename} is now being analyzed.")
+        
+        background_tasks.add_task(process_case_background, case_id, file_path, task_type)
+        return {"message": "Upload successful", "case_id": case_id}
+    finally:
+        db.close()
+
+@router.get("/cases/{username}")
+def get_user_cases(username: str):
+    """
+    Fetch all analysis cases for a specific user.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).order_by(Dataset.id.desc()).all()
+        return {
+            "cases": [
+                {
+                    "case_id": d.case_id,
+                    "filename": d.filename,
+                    "task_type": d.task_type,
+                    "review_status": d.review_status,
+                    "created_date": d.created_at
+                }
+                for d in datasets
+            ]
+        }
+    finally:
+        db.close()
+
+@router.delete("/cases/{case_id}")
+def delete_case(case_id: str):
+    """
+    Delete a specific analysis case and its associated files.
+    """
+    db = SessionLocal()
+    try:
+        ds = db.query(Dataset).filter(Dataset.case_id == case_id).first()
+        if not ds:
+            raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Cleanup files
+        try:
+            if os.path.exists(ds.file_path): os.remove(ds.file_path)
+            res_p = f"{ds.file_path}_results.json"
+            if os.path.exists(res_p): os.remove(res_p)
+            enr_p = ds.file_path.replace(ds.case_id, f"enriched_{ds.case_id}")
+            if os.path.exists(enr_p): os.remove(enr_p)
+        except: pass
+        
+        db.delete(ds)
+        db.commit()
+        return {"message": "Deleted"}
+    finally:
+        db.close()
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 
 import time
 
@@ -28,23 +139,26 @@ def create_notification(db: Session, user_id: int, message: str):
 
 def process_case_background(case_id: str, file_path: str, task_type: str):
     """
-    Background worker with specialized status-notification synchronization.
-    Lifecycle: pending -> processing -> completed.
+    Background worker for processing dataset analysis tasks.
+    Lifecycle: pending -> processing -> completed (synchronized for real-time notifications).
     """
     db = SessionLocal()
     try:
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
-        if not dataset:
-            return
+        if not dataset: return
+
+        # Conversion logic for Excel datasets
+        if file_path.lower().endswith((".xlsx", ".xls")):
+            df_temp = pd.read_excel(file_path)
+            new_file_path = file_path.rsplit('.', 1)[0] + '.csv'
+            df_temp.to_csv(new_file_path, index=False)
+            file_path = new_file_path
             
         # STEP 1: PROCESSING START
         dataset.review_status = "processing"
         db.commit()
-        create_notification(db, dataset.user_id, f"Processing started for report: {dataset.filename}")
-        
-        # Artificial delay for guided workflow visibility
-        time.sleep(3)
-            
+        time.sleep(2) # Brief delay for guided UI visibility
+
         out_results = {}
         if task_type == "Sentiment Analysis":
             CHUNK_SIZE, MAX_ROWS = 5000, 100_000 
@@ -54,52 +168,98 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             rows_processed = 0
             
             for chunk_df in pd.read_csv(file_path, chunksize=CHUNK_SIZE):
-                if rows_processed >= MAX_ROWS:
-                    break
+                if rows_processed >= MAX_ROWS: break
+                
                 if text_col is None:
                     possible_cols = ["review", "feedback", "comment", "text"]
                     text_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in possible_cols)), None)
                     if not text_col: text_col = chunk_df.select_dtypes(include="object").columns[0]
                 
-                # Dynamic Date/Time column discovery for professional timeline charts
                 if date_col is None:
                     date_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["date", "timestamp", "created", "time"])), None)
                 
                 user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
                 chunk_reviews = chunk_df[text_col].fillna("").astype(str).tolist()
                 chunk_results = [analyze_sentiment(r) for r in chunk_reviews]
+                
                 for res in chunk_results:
                     lbl = res["label"]
                     total += 1
                     if lbl == "POSITIVE": positive += 1
                     elif lbl == "NEGATIVE": negative += 1
                     else: neutral += 1
+                
                 review_texts_full.extend(chunk_reviews)
                 if len(results_preview) < 1000:
                     for idx, (review, sentiment) in enumerate(zip(chunk_reviews, chunk_results)):
                         item = {"review": review, **sentiment}
                         if user_id_col: item[user_id_col] = str(chunk_df.iloc[idx][user_id_col])
-                        # Preserve original timeline type (numeric or string) for visualization
                         if date_col: 
                             val = chunk_df.iloc[idx][date_col]
-                            # Clean conversion for JSON serialization (handles int64/float64)
-                            if pd.notnull(val):
-                                item[date_col] = val.item() if hasattr(val, 'item') else val
-                            else:
-                                item[date_col] = None
+                            if pd.notnull(val): item[date_col] = val.item() if hasattr(val, 'item') else val
+                            else: item[date_col] = None
                         results_preview.append(item)
+                
                 chunk_df["sentiment_label"] = [r["label"] for r in chunk_results]
                 enriched_chunks.append(chunk_df)
                 rows_processed += len(chunk_df)
-            keywords_sample = review_texts_full[:5000]
+
+            # --- Server-side User Engagement Insights ---
+            full_df = pd.concat(enriched_chunks, ignore_index=True)
+            
+            # --- DEBUG LOGS (Requested) ---
+            app_user = db.query(User).filter(User.id == dataset.user_id).first()
+            user_name_raw = app_user.username if app_user else "UNKNOWN"
+            unique_ids = []
+            
+            user_engagement = []
+            user_col = next((col for col in ['user_id', 'userid', 'user', 'customer_id', 'customerid', 'id'] if col.lower() in [c.lower() for c in full_df.columns]), None)
+            if not user_col:
+                user_col = next((c for c in full_df.columns if 'id' in c.lower()), None)
+                
+            if user_col:
+                actual_user_col = next(col for col in full_df.columns if col.lower() == user_col.lower())
+                unique_ids = full_df[actual_user_col].astype(str).unique().tolist()
+                
+                # Filter logic: Standardize both to lowercase for matching
+                # Requirement: "The user logs in, they should see their own feedback insights"
+                filtered_df = full_df[full_df[actual_user_col].astype(str).str.lower() == user_name_raw.lower()]
+                
+                print(f"--- [ICFA DEBUG] Analysis ID: {case_id} ---")
+                print(f"Current Dashboard User: {user_name_raw}")
+                print(f"Dataset unique {actual_user_col} values: {unique_ids[:10]}...")
+                print(f"Records matching dashboard user: {len(filtered_df)}")
+                
+                def get_dom_sent(x):
+                    m = x.mode(); return m[0] if not m.empty else "UNKNOWN"
+                def get_churn_score(x):
+                    tot = len(x); return round((x.str.upper() == 'NEGATIVE').sum() / tot, 2) if tot > 0 else 0.0
+                
+                # Aggregate ALL for the overview, highlighted for specific user later
+                agg_df = full_df.groupby(actual_user_col).agg(
+                    Total_Comments=(text_col, 'count'),
+                    Sentiment_Summary=('sentiment_label', get_dom_sent),
+                    Churn_Score=('sentiment_label', get_churn_score)
+                ).reset_index()
+                agg_df.rename(columns={actual_user_col:'User ID', 'Total_Comments':'Total Comments', 'Sentiment_Summary':'Sentiment Summary', 'Churn_Score':'Churn Score'}, inplace=True)
+                user_engagement = agg_df.to_dict(orient='records')
+            else:
+                print(f"--- [ICFA DEBUG] No ID column found in dataset. ---")
+
             enriched_path = file_path.replace(case_id, f"enriched_{case_id}")
-            pd.concat(enriched_chunks, ignore_index=True).to_csv(enriched_path, index=False)
+            full_df.to_csv(enriched_path, index=False)
+            
+            csv_b64 = None
+            if os.path.getsize(enriched_path) < (20 * 1024 * 1024):
+                with open(enriched_path, "rb") as f: csv_b64 = base64.b64encode(f.read()).decode("utf-8")
+
             out_results = {
                 "total": total, "positive": positive, "negative": negative, "neutral": neutral,
-                "results": results_preview[:1000], 
-                "freq_keywords": extract_keywords_frequency(keywords_sample, 15),
-                "tfidf_keywords": extract_keywords_tfidf(keywords_sample, 15)
+                "results": results_preview[:1000], "freq_keywords": extract_keywords_frequency(review_texts_full[:5000], 15),
+                "tfidf_keywords": extract_keywords_tfidf(review_texts_full[:5000], 15),
+                "user_engagement": user_engagement, "enriched_csv": csv_b64
             }
+
         elif task_type == "Churn Prediction":
             total_customers = predicted_churn_total = 0
             all_predictions = []
@@ -182,114 +342,39 @@ def mark_notification_read(notif_id: int):
     finally:
         db.close()
 
-@router.post("/upload")
-def upload_dataset(
-    background_tasks: BackgroundTasks, 
-    file: UploadFile = File(...), 
-    username: str = Form(...), 
-    task_type: str = Form(...)
-):
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.delete("/cases/all/{username}")
+def delete_all_cases(username: str):
     """
-    Endpoint to upload a dataset and trigger background processing.
+    Delete all cases and associated files for a user.
     """
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-            
-        case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
-        temp_file_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")
-        
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        new_ds = Dataset(
-            case_id=case_id, 
-            user_id=user.id, 
-            filename=file.filename, 
-            file_path=temp_file_path, 
-            source="web", 
-            review_status="Pending Review", 
-            extraction_status="1 of 1", 
-            task_type=task_type
-        )
-        db.add(new_ds)
+        if not user: raise HTTPException(status_code=404, detail="User not found")
+        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
+        for ds in datasets:
+            try:
+                if os.path.exists(ds.file_path): os.remove(ds.file_path)
+                res_p = f"{ds.file_path}_results.json"
+                if os.path.exists(res_p): os.remove(res_p)
+                enr_p = ds.file_path.replace(ds.case_id, f"enriched_{ds.case_id}")
+                if os.path.exists(enr_p): os.remove(enr_p)
+            except: pass
+            db.delete(ds)
         db.commit()
-        db.refresh(new_ds)
-        
-        background_tasks.add_task(
-            process_case_background, 
-            case_id=new_ds.case_id, 
-            file_path=temp_file_path, 
-            task_type=task_type
-        )
-        return {"message": "File uploaded", "case_id": new_ds.case_id, "filename": new_ds.filename}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"message": "All cases deleted"}
     finally:
         db.close()
 
-@router.get("/cases/{username}")
-def get_user_cases(username: str):
-    """
-    Fetch all analysis cases associated with a specific user.
-    """
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == username).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).order_by(Dataset.id.desc()).all()
-        return {
-            "cases": [
-                {
-                    "case_id": ds.case_id, 
-                    "created_date": ds.created_at, 
-                    "source": ds.source, 
-                    "review_status": ds.review_status, 
-                    "extraction_status": ds.extraction_status, 
-                    "task_type": ds.task_type, 
-                    "filename": ds.filename,
-                    "notification_seen": ds.notification_seen
-                } 
-                for ds in datasets
-            ]
-        }
-    finally:
-        db.close()
 
-@router.delete("/cases/{case_id}")
-def delete_case(case_id: str):
-    """
-    Delete a specific case and its associated files.
-    """
-    db = SessionLocal()
-    try:
-        dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
-        if not dataset:
-            raise HTTPException(status_code=404, detail="Case not found")
-            
-        if os.path.exists(dataset.file_path):
-            os.remove(dataset.file_path)
-            
-        enriched_path = dataset.file_path.replace(case_id, f"enriched_{case_id}")
-        if os.path.exists(enriched_path):
-            os.remove(enriched_path)
-            
-        results_path = f"{dataset.file_path}_results.json"
-        if os.path.exists(results_path):
-            os.remove(results_path)
-            
-        db.delete(dataset)
-        db.commit()
-        return {"message": "Case deleted"}
-    finally:
-        db.close()
 
 @router.post("/cases/{case_id}/retry")
-def retry_case(case_id: str, background_tasks: BackgroundTasks):
+async def retry_case(case_id: str, background_tasks: BackgroundTasks):
     """
     Reprocess a case that might have failed or needs updating.
     """
@@ -298,14 +383,14 @@ def retry_case(case_id: str, background_tasks: BackgroundTasks):
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not dataset:
             raise HTTPException(status_code=404, detail="Case not found")
-            
+
         dataset.review_status = "Pending Review"
         db.commit()
-        
+
         background_tasks.add_task(
-            process_case_background, 
-            case_id=dataset.case_id, 
-            file_path=dataset.file_path, 
+            process_case_background,
+            case_id=dataset.case_id,
+            file_path=dataset.file_path,
             task_type=dataset.task_type
         )
         return {"message": "Case queued"}
@@ -338,11 +423,11 @@ def get_case_results(case_id: str):
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not dataset:
             raise HTTPException(status_code=404, detail="Case not found")
-            
+
         results_path = f"{dataset.file_path}_results.json"
         if not os.path.exists(results_path):
             raise HTTPException(status_code=404, detail="Results not ready")
-            
+
         with open(results_path, "r") as f:
             return json.load(f)
     finally:

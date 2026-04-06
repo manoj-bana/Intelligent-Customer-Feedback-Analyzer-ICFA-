@@ -18,6 +18,8 @@ ICFA is a centralized platform where businesses can upload customer datasets (fe
 - **Secure Authentication**: JWT-based user accounts with security-question-based password resets.
 - **Case Management**: Organize datasets into "Cases" for asynchronous processing.
 - **Sentiment Analysis**: Automated sentiment scoring (Positive, Negative, Neutral) using the VADER model.
+- **Image-to-CSV OCR**: Advanced Optical Character Recognition to extract feedback and churn data from screenshots and paper scans.
+- **Handwriting Support**: Intelligent pre-processing to recognize handwritten customer feedback from mobile photos or scanned cards.
 - **Keyword Extraction**: Discovery of trending topics using Frequency and TF-IDF analysis.
 - **Churn Prediction**: Supervised machine learning to estimate churn probability for individual customers.
 - **Interactive KPI Dashboard**: Real-time status monitoring and visual reporting.
@@ -34,6 +36,8 @@ ICFA is a centralized platform where businesses can upload customer datasets (fe
 ### Machine Learning & Data Processing
 - **NLP**: `nltk` (VADER), `scikit-learn` (TF-IDF).
 - **ML Modeling**: `scikit-learn`, `joblib` (Model persistence).
+- **OCR Engine**: `EasyOCR` — *Deep learning based multi-lingual text extraction.*
+- **Image Processing**: `OpenCV`, `Pillow` — *Professional-grade cleaning, deskewing, and binarization.*
 - **Data Analysis**: `pandas`, `numpy`.
 - **Visualization**: `matplotlib`, `plotly` (via Streamlit).
 
@@ -49,12 +53,16 @@ ICFA is a centralized platform where businesses can upload customer datasets (fe
 ICFA uses a decoupled architecture where the Frontend communicates with the Backend via a RESTful API.
 
 ### High-Level Flow
-1. **Ingestion**: User uploads a CSV file through the Streamlit UI.
-2. **Persistence**: Backend saves the file metadata and queues a Background Task.
-3. **Processing**:
-   - **Scenario A (Sentiment)**: The system cleans text, calculates sentiment scores, and extracts keywords.
-   - **Scenario B (Churn)**: The system preprocesses features and runs the pre-trained Random Forest model.
-4. **Reporting**: Results are stored as JSON and exposed through the `/results` endpoint for the dashboard to visualize.
+1. **Ingestion**: User uploads a CSV, XLSX, PNG, or JPG file.
+2. **Pre-processing (For Images)**:
+   - **Clean**: OpenCV handles deskewing (straightening) and binarization.
+   - **Extract**: EasyOCR transcribes text and clusters it into structured tables.
+   - **Munge**: Fuzzy logic maps detected headers (e.g., "usr") to system columns ("User").
+3. **Persistence**: Backend saves the processed file and queues a Background Task.
+4. **Processing**:
+   - **Scenario A (Sentiment)**: The system cleans text (including OCR typo-correction), calculates sentiment, and extracts keywords.
+   - **Scenario B (Churn)**: The system preprocesses features and runs the Random Forest model.
+5. **Reporting**: Results are stored as JSON and visualized on the dashboard.
 
 ### Component Interaction (Mermaid Diagram)
 
@@ -116,8 +124,9 @@ graph TD
 - **`database/db.py`**: Configures SQLAlchemy engine and session factory.
 - **`database/models.py`**: Defines Schema for `User`, `Dataset`, `Feedback`, and `ChurnPrediction`.
 - **`routes/ingest.py`**: Manages the upload pipeline and asynchronous background workers for analysis.
-- **`utils/sentiment.py`**: NLP logic using NLTK VADER and TF-IDF keyword extraction.
+- **`utils/sentiment.py`**: NLP logic using NLTK VADER (with OCR typo correction) and TF-IDF keyword extraction.
 - **`utils/churn_model.py`**: Logic for loading the churn model, validating CSV schemas, and running inference.
+- **`utils/ocr.py`**: Professional OCR pipeline with image cleaning, proximity-based row/column clustering, and fuzzy header mapping.
 
 ### **Frontend UI (`/frontend`)**
 - **`app.py`**: Main Streamlit entry point. Manages session state and page routing.
