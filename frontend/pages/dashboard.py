@@ -2,31 +2,84 @@ import streamlit as st
 import requests
 import pandas as pd
 
+from frontend.errors import ERROR_MESSAGES
+import re
+
 API_URL = "http://127.0.0.1:8000"
+
 
 def show():
     """
     Main entry point for the dashboard. Handles sidebar navigation and page routing.
     """
-    st.sidebar.title(f"👤 {st.session_state.username}")
+    st.sidebar.markdown(f"### 👤 {st.session_state.username}")
+    if st.sidebar.button("👤 Manage Profile", key="btn_sidebar_profile", width='stretch'):
+        st.session_state.current_page_nav = "👤 Manage Profile"
+        st.query_params["page"] = "👤 Manage Profile"
+        st.rerun()
+
     st.sidebar.markdown("---")
+
+    # Reuse CSS patterns from login/register for consistency
+    st.markdown("""
+    <style>
+    /* Hide Streamlit Password Eye Icon Fix (Consistency with Login/Register) */
+    [data-testid="stTextInput"] [data-testid="styled-input-container"] button {
+        display: none !important;
+    }
+    input[type="password"]::-ms-reveal,
+    input[type="password"]::-ms-clear,
+    input[type="password"]::-webkit-credentials-auto-fill-button {
+        display: none !important;
+    }
+    
+    /* Checklist Styling */
+    .checklist-item { font-size: 0.85rem; margin-bottom: 2px; }
+    .check-valid { color: #059669; }
+    .check-invalid { color: #dc2626; }
+    
+    /* Inline Message Styling */
+    .inline-msg { font-size: 0.8rem; margin-top: -15px; margin-bottom: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
+
 
     # Handle page persistence in query params
     pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
+
+
     query_page = st.query_params.get("page", "🏠 Home")
     page_index = 0
     if query_page in pages:
         page_index = pages.index(query_page)
+    
+    # Check if we are on the hidden Profile page
+    is_profile_page = (query_page == "👤 Manage Profile")
 
+
+    # Store the result of radio navigation
+    # If we are on profile page, the radio shouldn't override until a selection is changed manually
     page = st.sidebar.radio(
         "Navigate",
         pages,
-        index=page_index
+        index=page_index if not is_profile_page else 0
     )
+
+
+
     
-    # Update query params to current page if it changed
-    if st.query_params.get("page") != page:
+    # Update query params to current page if it changed (and we aren't explicitly on profile page)
+    if st.query_params.get("page") != page and not is_profile_page:
         st.query_params["page"] = page
+        st.rerun()
+    
+    # If the user clicks a radio item WHILE on profile page, they want to leave the profile
+    # Detect radio change to navigate away from profile
+    if is_profile_page and page != pages[0] and page in pages:
+        # User explicitly clicked something else in sidebar radio
+        st.query_params["page"] = page
+        st.rerun()
+
 
     if st.sidebar.button("🚪 Logout"):
         st.session_state.logged_in = False
@@ -38,7 +91,9 @@ def show():
         
         st.rerun()
 
-    if page == "🏠 Home":
+    if is_profile_page:
+        show_profile_management()
+    elif page == "🏠 Home":
         show_home()
 
     elif page == "☁️ Document Ingestion":
@@ -54,6 +109,107 @@ def show():
         with tab2:
             from frontend.pages import churn_page
             churn_page.show()
+    elif page == "👤 Manage Profile":
+        show_profile_management()
+
+def show_profile_management():
+    st.title("👤 Account Management")
+    st.markdown("Update your account security settings below.")
+    st.divider()
+    
+    username = st.session_state.get("username", "")
+    
+    with st.container(border=True):
+        st.subheader("Change Password")
+        st.info("Update your security credentials here.")
+        
+        # 1. Current Password Validation (Real-time feedback using Login Logic)
+        old_p = st.text_input("Current Password", type="password", key="cp_old_v4")
+        
+        is_old_valid = False
+        if old_p:
+            try:
+                # Reuse existing auth logic: verify by checking login
+                v_res = requests.post(
+                    f"{API_URL}/auth/login",
+                    json={"username": username, "password": old_p},
+                    timeout=5
+                )
+                if v_res.status_code == 200:
+                    st.markdown(f'<p class="inline-msg check-valid">✓ {ERROR_MESSAGES["OLD_PASSWORD_CORRECT"]}</p>', unsafe_allow_html=True)
+                    is_old_valid = True
+                else:
+                    st.markdown(f'<p class="inline-msg check-invalid">❌ {ERROR_MESSAGES["OLD_PASSWORD_INVALID"]}</p>', unsafe_allow_html=True)
+            except Exception:
+                pass
+
+        # 2. New Password Validation (Strictly mirroring Register/Forgot password)
+        new_p = st.text_input("New Password", type="password", key="cp_new_v4")
+        
+        # Reuse existing password rules (same pattern as Register)
+        rules = [
+            (len(new_p) >= 8, "At least 8 characters"),
+            (bool(re.search(r'[A-Z]', new_p)), "Uppercase letter (A–Z)"),
+            (bool(re.search(r'[a-z]', new_p)), "Lowercase letter (a–z)"),
+            (bool(re.search(r'\d', new_p)), "Number (0–9)"),
+            (bool(re.search(r'[@$!%*?&]', new_p)), "Special character (@$!%*?&)")
+        ]
+        
+        if new_p:
+            # Block reuse check
+            if new_p == old_p and is_old_valid:
+                st.markdown(f'<p class="inline-msg check-invalid">❌ {ERROR_MESSAGES["SAME_PASSWORD_ERROR"]}</p>', unsafe_allow_html=True)
+            
+            # Show rules checklist (Same style as Register Page)
+            for valid, label in rules:
+                icon = "✅" if valid else "❌"
+                color = "check-valid" if valid else "check-invalid"
+                st.markdown(f'<div class="checklist-item {color}">{icon} {label}</div>', unsafe_allow_html=True)
+
+        confirm_p = st.text_input("Confirm New Password", type="password", key="cp_confirm_v4")
+        
+        # Match Indicator
+        if confirm_p:
+            if new_p == confirm_p:
+                st.markdown('<p class="inline-msg check-valid">✓ Passwords match</p>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<p class="inline-msg check-invalid">⚠ {ERROR_MESSAGES["PASSWORD_MISMATCH"]}</p>', unsafe_allow_html=True)
+
+        # 3. Final Submission
+        if st.button("🛡️ Update Password", width='stretch', type="primary"):
+            if not old_p or not new_p or not confirm_p:
+                st.error(ERROR_MESSAGES["FIELDS_REQUIRED"])
+            elif not is_old_valid:
+                st.error(ERROR_MESSAGES["OLD_PASSWORD_INVALID"])
+            elif new_p == old_p:
+                st.error(ERROR_MESSAGES["SAME_PASSWORD_ERROR"])
+            elif new_p != confirm_p:
+                st.error(ERROR_MESSAGES["PASSWORD_MISMATCH"])
+            elif not all(r[0] for r in rules):
+                st.error(ERROR_MESSAGES["PASSWORD_REQUIREMENTS"])
+            else:
+                try:
+                    with st.spinner("Processing update..."):
+                        res = requests.post(
+                            f"{API_URL}/auth/change-password",
+                            json={
+                                "username": username,
+                                "old_password": old_p,
+                                "new_password": new_p
+                            },
+                            timeout=10
+                        )
+                        if res.status_code == 200:
+                            st.success(f"✅ {ERROR_MESSAGES['CHANGE_SUCCESSFUL']}")
+                            st.toast("Credentials updated!")
+                        else:
+                            st.error(f"❌ {res.json().get('detail', 'Update failed')}")
+                except Exception:
+                    st.error(f"❌ {ERROR_MESSAGES['SERVICE_ERROR']}")
+
+
+
+
 
 @st.cache_data(ttl=60) # Cache for 60 seconds to allow for new uploads
 def get_cases(username):
@@ -272,7 +428,7 @@ def render_cases_fragment(cases_data):
         selected_case_id = case_mapping[selected_case_label]
         selected_case = case_lookup[selected_case_id]
         
-        col_act1, col_act2 = st.columns([1, 4])
+        col_act1, col_act2, col_act3 = st.columns([1.5, 2.5, 2.5])
         with col_act1:
             # Only show Retry button for stalled/error cases
             if "Completed" not in selected_case["review_status"]:
@@ -294,20 +450,15 @@ def render_cases_fragment(cases_data):
         with col_act2:
             # Check if this specific case ID is currently in the 'confirmation' state
             if st.session_state.get('confirm_delete_id') == selected_case_id:
-                st.warning(f"⚠️ Are you sure you want to delete **{selected_case['filename']}**?")
+                st.warning(f"⚠️ Delete **{selected_case['filename']}**?")
                 cy, cn = st.columns(2)
                 with cy:
-                    if st.button("✅ Yes, Delete", key=f"btn_dy_{selected_case_id}", width='stretch'):
+                    if st.button("✅ Yes", key=f"btn_dy_{selected_case_id}", width='stretch'):
                         try:
-                            # Perform deletion request
                             del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
                             if del_res.status_code == 200:
-                                # Clear confirmation state
                                 st.session_state.confirm_delete_id = None
-                                
-                                # Clear our data cache instantly so the dashboard updates without delay
                                 get_cases.clear()
-                                
                                 st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
                                 st.rerun()
                             else:
@@ -315,12 +466,38 @@ def render_cases_fragment(cases_data):
                         except Exception as e:
                             st.error(f"Connection error: {e}")
                 with cn:
-                    if st.button("❌ Cancel", key=f"btn_dn_{selected_case_id}", width='stretch'):
+                    if st.button("❌ No", key=f"btn_dn_{selected_case_id}", width='stretch'):
                         st.session_state.confirm_delete_id = None
                         st.rerun()
             else:
-                # Initial delete button
-                if st.button("🗑️ Delete Dataset", key=f"btn_del_{selected_case_id}", width='stretch'):
+                if st.button("🗑️ Delete Selected", key=f"btn_del_{selected_case_id}", width='stretch'):
                     st.session_state.confirm_delete_id = selected_case_id
                     st.rerun()
 
+        with col_act3:
+            # Delete All Confirmation Logic
+            if st.session_state.get('confirm_delete_all'):
+                st.error("🚨 Delete ALL datasets?")
+                ay, an = st.columns(2)
+                with ay:
+                    if st.button("💥 YES, ALL", key="btn_del_all_confirm", width='stretch'):
+                        try:
+                            username = st.session_state.get("username", "")
+                            del_all_res = requests.delete(f"{API_URL}/ingest/cases/all/{username}", timeout=10)
+                            if del_all_res.status_code == 200:
+                                st.session_state.confirm_delete_all = False
+                                get_cases.clear()
+                                st.toast("All datasets deleted!", icon="🚨")
+                                st.rerun()
+                            else:
+                                st.error(f"Server error: {del_all_res.text}")
+                        except Exception as e:
+                            st.error(f"Connection error: {e}")
+                with an:
+                    if st.button("🛑 Stop", key="btn_del_all_cancel", width='stretch'):
+                        st.session_state.confirm_delete_all = False
+                        st.rerun()
+            else:
+                if st.button("🚨 Delete All Once", key="btn_delete_all_trigger", width='stretch', type="secondary"):
+                    st.session_state.confirm_delete_all = True
+                    st.rerun()

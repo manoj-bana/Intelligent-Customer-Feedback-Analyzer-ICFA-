@@ -69,6 +69,9 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     if not text_col:
                         text_col = chunk_df.select_dtypes(include="object").columns[0]
                 
+                # Identify user ID column to preserve
+                user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
+                
                 chunk_reviews = chunk_df[text_col].fillna("").tolist()
                 chunk_labels, chunk_scores = [], []
                 for idx, review in enumerate(chunk_reviews):
@@ -83,9 +86,11 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     else:
                         neutral += 1
                         
-                    if len(results_preview) < 10000:
-                        results_preview.append({"review": str(review), **sentiment})
-                        review_texts_preview.append(str(review))
+                    results_item = {"review": str(review), **sentiment}
+                    if user_id_col:
+                        results_item[user_id_col] = str(chunk_df.iloc[idx][user_id_col])
+                    results_preview.append(results_item)
+                    review_texts_preview.append(str(review))
                         
                 chunk_df["SentimentLabel"], chunk_df["SentimentScore"] = chunk_labels, chunk_scores
                 enriched_chunks.append(chunk_df)
@@ -196,9 +201,9 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
 
 @router.post("/upload")
 def upload_dataset(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    username: str = Form(...),
+    background_tasks: BackgroundTasks, 
+    file: UploadFile = File(...), 
+    username: str = Form(...), 
     task_type: str = Form(...)
 ):
     """
@@ -213,10 +218,10 @@ def upload_dataset(
 
         case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
         temp_file_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")
-
+        
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
+            
         new_ds = Dataset(
             case_id=case_id,
             user_id=user.id,
@@ -313,8 +318,50 @@ def delete_case(case_id: str):
         db.close()
 
 
+@router.delete("/cases/all/{username}")
+def delete_all_cases(username: str):
+    """
+    Delete all cases and their associated files for a specific user.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
+        
+        for dataset in datasets:
+            try:
+                if os.path.exists(dataset.file_path):
+                    os.remove(dataset.file_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {dataset.file_path}: {e}")
+
+            enriched_path = dataset.file_path.replace(dataset.case_id, f"enriched_{dataset.case_id}")
+            try:
+                if os.path.exists(enriched_path):
+                    os.remove(enriched_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {enriched_path}: {e}")
+
+            results_path = f"{dataset.file_path}_results.json"
+            try:
+                if os.path.exists(results_path):
+                    os.remove(results_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {results_path}: {e}")
+
+            db.delete(dataset)
+            
+        db.commit()
+        return {"message": "All cases deleted"}
+    finally:
+        db.close()
+
+
 @router.post("/cases/{case_id}/retry")
-def retry_case(case_id: str, background_tasks: BackgroundTasks):
+async def retry_case(case_id: str, background_tasks: BackgroundTasks):
     """
     Reprocess a case that might have failed or needs updating.
     """
@@ -357,6 +404,3 @@ def get_case_results(case_id: str):
             return json.load(f)
     finally:
         db.close()
-
-
-

@@ -53,6 +53,14 @@ class RegisterRequest(BaseModel):
     security_question: str
     security_answer: str
 
+class ChangePasswordRequest(BaseModel):
+    username: str
+    old_password: str
+    new_password: str
+
+
+# --- Endpoints ---
+
 @router.get("/check-username")
 def check_username(username: str = Query(...)):
     """Validates if a username profile exists."""
@@ -224,5 +232,22 @@ def reset_password(data: dict):
         db.commit()
 
         return {"message": "Password reset successful"}
+    finally:
+        db.close()
+@router.post("/change-password")
+def change_password(data: ChangePasswordRequest):
+    """Update user password after verifying the old one."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == data.username).first()
+        if not user or not verify_password(data.old_password, user.password):
+            raise HTTPException(status_code=401, detail="Incorrect old password")
+            
+        if len(data.new_password) < 8:
+            raise HTTPException(status_code=400, detail="New password must be 8+ chars")
+            
+        user.password = hash_password(data.new_password)
+        db.commit()
+        return {"message": "Password updated successfully"}
     finally:
         db.close()
