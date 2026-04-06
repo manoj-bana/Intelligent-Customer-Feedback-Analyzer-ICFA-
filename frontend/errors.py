@@ -12,6 +12,12 @@ ERROR_MESSAGES = {
     "FIELDS_REQUIRED": "Please fill all required fields",
     "PASSWORD_REQUIREMENTS": "Password does not meet security requirements",
 "SERVICE_ERROR": "Service error, please try again later",
-    "BACKEND_OFFLINE": "Backend service is currently unavailable",
-    "TOKEN_EXPIRED": "Reset token expired or invalid"
+    "TOKEN_EXPIRED": "Reset token expired or invalid",
+    "CHANGE_SUCCESSFUL": "Password updated successfully!",
+    "WRONG_OLD_PASSWORD": "Current password is incorrect",
+    "OLD_PASSWORD_CORRECT": "Password is correct",
+    "OLD_PASSWORD_INVALID": "Password is invalid",
+    "SAME_PASSWORD_ERROR": "New password cannot be the same as the current password"
 }
+
+
