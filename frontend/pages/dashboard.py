@@ -16,11 +16,56 @@ def get_notifications(username):
     except: pass
     return []
 
+def inject_premium_css():
+    """Injects high-end enterprise styling for glassmorphism and extreme layout density."""
+    st.markdown("""
+        <style>
+            /* Eliminate Top Padding & Standardize Spacing */
+            .block-container { padding-top: 1.5rem !important; padding-bottom: 0rem !important; }
+            [data-testid="stAppViewHeader"] { display: none; } /* Hide redundant top bar if applicable */
+            
+            [data-testid="stMetricValue"] { font-size: 2.2rem !important; font-weight: 800 !important; }
+            .kpi-container { padding: 0.5rem 0; }
+            
+            /* Professional Section Density */
+            div[data-testid="stVerticalBlock"] > div { gap: 0.6rem !important; }
+            
+            .metric-card {
+                padding: 1.2rem; border-radius: 14px; color: white;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.08); transition: all 0.2s ease;
+                border: 1px solid rgba(255,255,255,0.05);
+            }
+            .metric-card:hover { transform: translateY(-3px); box-shadow: 0 8px 16px rgba(0,0,0,0.12); }
+            
+            /* High-Density Tracker Styling */
+            .compact-row { font-size: 0.85rem !important; line-height: 1.2 !important; }
+            hr { margin: 0.5rem 0 !important; opacity: 0.15 !important; }
+            
+            /* Gradients preserved */
+            .grad-total { background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); }
+            .grad-pending { background: linear-gradient(135deg, #92400e 0%, #f59e0b 100%); }
+            .grad-processing { background: linear-gradient(135deg, #1e40af 0%, #60a5fa 100%); }
+            .grad-completed { background: linear-gradient(135deg, #065f46 0%, #10b981 100%); }
+        </style>
+    """, unsafe_allow_html=True)
+
+def render_kpi_card(label, value, icon, grad_class, delta=None):
+    """Renders a modern analytics KPI card using CSS."""
+    st.markdown(f"""
+        <div class="metric-card {grad_class}">
+            <div style="font-size: 2rem; margin-bottom: 0.5rem;">{icon}</div>
+            <div style="font-size: 0.8rem; font-weight: 500; text-transform: uppercase; opacity: 0.8; letter-spacing: 1px;">{label}</div>
+            <div style="font-size: 2.2rem; font-weight: 800; margin: 0.2rem 0;">{value}</div>
+            {f'<div style="font-size: 0.8rem; font-weight: 600; opacity: 0.9;">{delta}</div>' if delta else '<div style="height:19px"></div>'}
+        </div>
+    """, unsafe_allow_html=True)
+
 def show():
     """
     Main entry point for the dashboard. Handles navigation and the 
-    Persistent Notification Engine with silent auto-refresh.
+    Persistent Notification Engine with premium UI components.
     """
+    inject_premium_css()
     username = st.session_state.get("username", "")
     
     # Silent 5s heartbeat for live status and notifications
@@ -135,14 +180,16 @@ def get_cases(username):
 
 def show_home():
     """
-    Main home dashboard view. Displays fresh metrics and a list of cases.
+    Main home dashboard view. Displays fresh metrics and styled cases list.
+    Standardized width standards preserved.
     """
-    username = st.session_state.username
-    st.title("📊 ICFA Dashboard")
+    username = st.session_state.get("username", "User")
+    st.title("📊 ICFA Analytics Master")
+    st.markdown(f"**Welcome back,** {username} 👋")
 
     cases_data = get_cases(username)
     
-    # Define fresh metrics with zero-division safety
+    # Calculate live metrics locally for maximum speed
     total_datasets = len(cases_data)
     pending = len([c for c in cases_data if str(c.get("review_status")).lower() == "pending"])
     processing = len([c for c in cases_data if str(c.get("review_status")).lower() == "processing"])
@@ -152,150 +199,116 @@ def show_home():
     if total_datasets > 0:
         success_rate = round((completed / total_datasets * 100))
 
-    # --- Metrics Layout ---
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        st.metric("Total Datasets", total_datasets, delta=f"{success_rate}% success")
-    with kpi2:
-        st.metric("Pending Review", pending, delta=f"{pending} in queue" if pending > 0 else None, delta_color="inverse")
-    with kpi3:
-        st.metric("Processing...", processing)
-    with kpi4:
-        st.metric("Review Complete", completed)
-
-    st.divider()
+    # --- Premium KPI Row ---
+    k1, k2, k3, k4 = st.columns(4)
+    with k1: render_kpi_card("Total Datasets", total_datasets, "📊", "grad-total", f"↑ {success_rate}% Success")
+    with k2: render_kpi_card("Awaiting Queue", pending, "⏳", "grad-pending", f"{pending} in queue" if pending > 0 else "System Clear")
+    with k3: render_kpi_card("Processing", processing, "🔄", "grad-processing", "Live analysis...")
+    with k4: render_kpi_card("Completed", completed, "✅", "grad-completed", "Ready for review")
     
-    # --- "My Cases" Data Grid ---
+    st.markdown("---")
+    
+    # Delegate to the high-speed data fragment
     render_cases_fragment(cases_data)
 
 @st.fragment
 def render_cases_fragment(cases_data):
     """
-    Renders the cases list in an isolated fragment for high-speed pagination.
-    Only this block reruns when navigating between pages.
+    Renders the cases list in a professionally styled container.
     """
-    st.subheader("My Cases")
+    st.subheader("📋 Dataset Lifecycle Tracker")
     
     if not cases_data:
         st.info("No cases found. Navigate to `Document Ingestion` to upload your first dataset!")
         return
 
-    df_cases = pd.DataFrame(cases_data)
-    df_cases["created_date"] = pd.to_datetime(df_cases["created_date"], errors="coerce")
+    # Dual-column Search and Clear Interface (Pre-instantiation order)
+    s_col1, s_col2 = st.columns([10, 2])
     
-    # Reset pagination if filters change
-    def reset_page():
-        st.session_state.current_page = 1
+    with s_col2:
+        st.write("<div style='height:31px'></div>", unsafe_allow_html=True)
+        if st.button("✖️ Clear", use_container_width=True, key="clear_search_btn"):
+             st.session_state.dash_search_in = ""
+             st.rerun(scope="fragment")
 
-    # Filter Controls
-    with st.expander("🔍 Filter Cases", expanded=False):
-        fc1, fc2, fc3, fc4 = st.columns(4)
-        with fc1:
-            min_date = df_cases["created_date"].min()
-            safe_min = min_date.date() if pd.notna(min_date) else pd.Timestamp.today().date()
-            date_from = st.date_input("From Date", value=safe_min, key="filter_date_from", on_change=reset_page)
-        with fc2:
-            max_date = df_cases["created_date"].max()
-            safe_max = max_date.date() if pd.notna(max_date) else pd.Timestamp.today().date()
-            date_to = st.date_input("To Date", value=safe_max, key="filter_date_to", on_change=reset_page)
-        with fc3:
-            status_opts = ["All"] + sorted(df_cases["review_status"].unique().tolist())
-            status_filter = st.selectbox("Status", status_opts, key="filter_status", on_change=reset_page)
-        with fc4:
-            type_opts = ["All"] + sorted(df_cases["task_type"].dropna().unique().tolist())
-            type_filter = st.selectbox("Report Type", type_opts, key="filter_type", on_change=reset_page)
+    with s_col1:
+        search = st.text_input("🔍 Search reports...", placeholder="Enter ID, filename, or type...", key="dash_search_in")
 
-    # Apply filtration masks
-    mask = (df_cases["created_date"].dt.date >= date_from) & (df_cases["created_date"].dt.date <= date_to)
-    if status_filter != "All":
-        mask &= (df_cases["review_status"] == status_filter)
-    if type_filter != "All":
-        mask &= (df_cases["task_type"] == type_filter)
-    
-    df_filtered = df_cases[mask].copy()
-    df_filtered["created_date"] = df_filtered["created_date"].dt.strftime("%Y-%m-%d %H:%M")
-    
-    cols_to_show = [
-        'case_id', 'created_date', 'source', 'review_status', 
-        'extraction_status', 'task_type', 'filename'
-    ]
-    df_filtered = df_filtered[cols_to_show]
-    df_filtered.columns = [
-        "Case ID", "Created Date", "Source", "Review Status", 
-        "Extraction Status", "Report Type", "File Name"
+    filtered_cases = [
+        c for c in cases_data 
+        if not search 
+        or search.lower() in c['filename'].lower() 
+        or search.lower() in c['task_type'].lower()
+        or search.lower() in str(c['case_id']).lower()
     ]
 
+    # Higher Density Headers
+    h_cols = st.columns([1.5, 3.5, 2, 1.5, 2, 1.5]) 
+    h_cols[0].markdown("<small><b>ID</b></small>", unsafe_allow_html=True)
+    h_cols[1].markdown("<small><b>Filename</b></small>", unsafe_allow_html=True)
+    h_cols[2].markdown("<small><b>Type</b></small>", unsafe_allow_html=True)
+    h_cols[3].markdown("<small><b>Status</b></small>", unsafe_allow_html=True)
+    h_cols[4].markdown("<small><b>Date</b></small>", unsafe_allow_html=True)
+    h_cols[5].markdown("<small><b>Action</b></small>", unsafe_allow_html=True)
+    
     # --- Pagination Logic ---
-    items_per_page = 10
-    total_items = len(df_filtered)
+    items_per_page = 5 
+    total_items = len(filtered_cases)
     total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+    if "current_page" not in st.session_state: st.session_state.current_page = 1
+    if st.session_state.current_page > total_pages: st.session_state.current_page = total_pages
     
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = 1
-        
-    # Clamp current page to valid range
-    if st.session_state.current_page > total_pages:
-        st.session_state.current_page = total_pages
-    if st.session_state.current_page < 1:
-        st.session_state.current_page = 1
-
-    # Pagination Controls (at the top)
-    pg_col1, pg_col2, pg_col3, pg_col4 = st.columns([2, 3, 2, 2])
-    
-    # Check for interactions before slicing
-    with pg_col1:
-        if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, width='stretch'):
-            st.session_state.current_page -= 1
-            try: st.rerun(scope="fragment")
-            except: st.rerun()
-            
-    with pg_col2:
-        # Placeholder
-        pass
-        
-    with pg_col3:
-        if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, width='stretch'):
-            st.session_state.current_page += 1
-            try: st.rerun(scope="fragment")
-            except: st.rerun()
-    
-    with pg_col4:
-        # Jump to page selector
-        if total_pages > 1:
-            jump_page = st.selectbox(
-                "Jump to", 
-                range(1, total_pages + 1), 
-                index=max(0, st.session_state.current_page - 1),
-                label_visibility="collapsed",
-                key="dash_jump_page"
-            )
-            if jump_page != st.session_state.current_page:
-                st.session_state.current_page = jump_page
-                try: st.rerun(scope="fragment")
-                except: st.rerun()
-
-    # Slice Data Calculation
+    # Paged Display
     start_idx = (st.session_state.current_page - 1) * items_per_page
     end_idx = start_idx + items_per_page
+    paged_cases = filtered_cases[start_idx:end_idx]
+    
+    for i, c in enumerate(paged_cases):
+        st.markdown('<div class="compact-row">', unsafe_allow_html=True)
+        st.divider()
+        c_id, c1, c2, c3, c4, c5 = st.columns([1.5, 3.5, 2, 1.5, 2, 1.5])
+        c_id.caption(f"`{c['case_id']}`")
+        c1.markdown(f"<p style='font-size:0.9rem; margin-bottom:0;'><b>{c['filename']}</b></p>", unsafe_allow_html=True)
+        c2.markdown(f"<p style='font-size:0.85rem; opacity:0.8; margin-bottom:0;'>{c['task_type'][:15]}..</p>" if len(c['task_type']) > 15 else f"<p style='font-size:0.85rem; opacity:0.8; margin-bottom:0;'>{c['task_type']}</p>", unsafe_allow_html=True)
+        
+        status = str(c.get("review_status")).lower()
+        if status == "completed":
+            c3.success("✅ Done")
+        elif status == "processing":
+            c3.info("🔄 Active")
+        elif status == "pending":
+            c3.warning("⏳ Queue")
+        elif "fail" in status or "error" in status:
+            c3.error("❌ Fail")
+        else:
+            c3.caption(status.capitalize())
+            
+        c4.caption(c.get("created_date", "N/A"))
+        
+        if status == "completed":
+            if c5.button("📊 Open", key=f"view_dash_{c['case_id']}_{i}", use_container_width=True):
+                st.query_params["page"] = "📊 Reports"
+                st.query_params["case_id"] = c["case_id"]
+                st.rerun()
+        else:
+            c5.button("⏳..", key=f"wait_dash_{c['case_id']}_{i}", disabled=True, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with pg_col2:
-        st.markdown(
-            f"<div style='text-align: center; padding-top: 5px; font-size: 1.1rem;'>"
-            f"Page <b>{st.session_state.current_page}</b> of <b>{total_pages}</b>"
-            f"</div>", 
-            unsafe_allow_html=True
-        )
-
-    st.caption(f"Showing items {start_idx + 1} to {min(end_idx, total_items)} of {total_items}")
-
-    # Slice Data
-    df_page = df_filtered.iloc[start_idx:end_idx]
-
-    st.dataframe(
-        df_page,
-        width='stretch',
-        hide_index=True,
-    )
+    # Minimalist Pagination Controls
+    st.divider()
+    pg1, pg2, pg3 = st.columns([1, 2, 1])
+    with pg1:
+        if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, width='stretch', key="pg_prev_btn"):
+            st.session_state.current_page -= 1
+            st.rerun(scope="fragment")
+    with pg2:
+        st.markdown(f"<div style='text-align: center; font-size: 0.9rem; opacity: 0.7;'>Page {st.session_state.current_page} of {total_pages}</div>", unsafe_allow_html=True)
+    with pg3:
+        if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, width='stretch', key="pg_next_btn"):
+            st.session_state.current_page += 1
+            st.rerun(scope="fragment")
+            
+    st.markdown("---")
 
     st.divider()
     
