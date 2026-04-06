@@ -40,6 +40,7 @@ def show():
 
     if page == "🏠 Home":
         show_home()
+
     elif page == "☁️ Document Ingestion":
         from frontend.pages import ingestion
         ingestion.show()

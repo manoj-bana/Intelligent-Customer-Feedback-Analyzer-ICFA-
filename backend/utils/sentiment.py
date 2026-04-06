@@ -64,6 +64,12 @@ def _clean_text_for_keywords(text: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).lower()
     return cleaned
 
+def _clean_text_for_sentiment(text: str) -> str:
+    """
+    Standard text cleaning for sentiment analysis.
+    """
+    return str(text).lower() if text else ""
+
 def analyze_sentiment(text: str) -> dict:
     """
     Analyzes the sentiment of a given string using the VADER model.
@@ -73,8 +79,9 @@ def analyze_sentiment(text: str) -> dict:
         if not text or str(text).strip() == "":
             return {"label": "NEUTRAL", "score": 0.5}
             
+        cleaned_text = _clean_text_for_sentiment(text)
         sia, _ = _get_resources()
-        scores = sia.polarity_scores(str(text))
+        scores = sia.polarity_scores(cleaned_text)
         comp = scores["compound"]
         
         label = "POSITIVE" if comp >= 0.05 else ("NEGATIVE" if comp <= -0.05 else "NEUTRAL")
