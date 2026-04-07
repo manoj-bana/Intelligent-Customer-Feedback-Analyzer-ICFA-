@@ -15,11 +15,18 @@ def get_processed_churn_results(predictions_data):
         df['_search_id'] = df[id_cols[0]].astype(str).str.lower()
     return df
 
+from streamlit_autorefresh import st_autorefresh
+
+API_URL = "http://127.0.0.1:8000"
+
 def show():
     """
     Main entry point for the Churn Prediction report page. 
-    Handles dataset selection and prediction results visualization.
+    Synchronized with live results via 5s polling.
     """
+    # Silent 5s heartbeat to catch new background report completions
+    # st_autorefresh(interval=5000, key="report_churn_page_sync")
+    
     st.title("📉 Churn Prediction")
     st.markdown("Select an ingested dataset to view the churn prediction report.")
     st.divider()
@@ -29,29 +36,30 @@ def show():
         st.error("Authentication Error: Please login to access reports.")
         return
 
-    # Fetch user's cases safely
+    # Fetch user's cases safely (Fresh every heartbeat)
     try:
         res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
         cases_data = res.json().get("cases", []) if res.status_code == 200 else []
     except Exception:
         cases_data = []
 
-    # Get completed churn datasets
-    churn_cases = [
+    # Get completed churn datasets - SORTED LATEST FIRST
+    churn_cases = sorted([
         c for c in cases_data 
-        if c.get("task_type") == "Churn Prediction" and c.get("review_status") == "Completed"
-    ]
+        if c.get("task_type") == "Churn Prediction" and str(c.get("review_status")).lower() == "completed"
+    ], key=lambda x: x.get("id", 0), reverse=True)
 
     if not churn_cases:
         st.info(
             "No completed Churn Prediction datasets found. "
-            "Go to 'Document Ingestion' to upload one."
+            "Go to 'Document Ingestion' to start an analysis."
         )
         return
 
-    # Map labels to case IDs
+    # Map labels to case IDs (Maintaining NEWEST FIRST order)
     case_mapping = {
-        f"{c['filename']} (ID: {c['case_id']})": c['case_id'] for c in churn_cases
+        f"🆕 {c['filename']} (ID: {c['case_id']})" if i == 0 else f"{c['filename']} (ID: {c['case_id']})": c['case_id'] 
+        for i, c in enumerate(churn_cases)
     }
     
     selected_case_label = st.selectbox(

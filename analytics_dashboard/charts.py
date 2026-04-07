@@ -47,17 +47,29 @@ def _build_line_chart(trend_data_tuple):
     return fig
 
 def generate_sentiment_line_chart(df):
+    # First exact math
     date_col = next((col for col in ['date', 'timestamp', 'created_at', 'time'] if col.lower() in [c.lower() for c in df.columns]), None)
+    
+    # Fallback substring match (e.g., 'ReviewDate', 'CreationTime')
+    if not date_col:
+        for c in df.columns:
+            if 'date' in c.lower() or 'time' in c.lower() or 'timestamp' in c.lower():
+                date_col = c
+                break
+                
     if date_col:
-        actual_date_col = next(col for col in df.columns if col.lower() == date_col.lower())
+        actual_date_col = next((col for col in df.columns if col.lower() == date_col.lower()), date_col)
+        
+        # Work on a copy to avoid modifying cached/frozen data
+        df_work = df.copy()
         
         # In case the time column is unix epoch (like in Amazon datasets)
-        if pd.api.types.is_numeric_dtype(df[actual_date_col]):
-            df['date_only'] = pd.to_datetime(df[actual_date_col], unit='s', errors='coerce').dt.date
+        if pd.api.types.is_numeric_dtype(df_work[actual_date_col]):
+            df_work['date_only'] = pd.to_datetime(df_work[actual_date_col], unit='s', errors='coerce').dt.date
         else:
-            df['date_only'] = pd.to_datetime(df[actual_date_col], errors='coerce').dt.date
+            df_work['date_only'] = pd.to_datetime(df_work[actual_date_col], errors='coerce').dt.date
             
-        df_valid_dates = df.dropna(subset=['date_only'])
+        df_valid_dates = df_work.dropna(subset=['date_only'])
         
         if not df_valid_dates.empty:
             trend = df_valid_dates.groupby(['date_only', 'sentiment_label']).size().reset_index(name='Count')
@@ -67,9 +79,10 @@ def generate_sentiment_line_chart(df):
             fig = _build_line_chart(trend_tuple)
             st.plotly_chart(fig, width='stretch')
         else:
-            st.info("No valid dates found for Sentiment Over Time chart.")
+            st.info(f"No valid dates found in column '{actual_date_col}' for Sentiment Over Time chart.")
     else:
-        st.info("No timeline data (date/time column) available for Sentiment Over Time chart.")
+        st.info(f"No timeline data (date/time column) available for Sentiment Over Time chart. Available columns: {list(df.columns)}")
+
 
 @st.cache_data
 def _build_keyword_chart(freq_data_tuple):

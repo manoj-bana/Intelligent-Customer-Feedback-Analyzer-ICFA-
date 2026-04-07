@@ -32,13 +32,14 @@ class Dataset(Base):
     filename = Column(String)
     file_path = Column(String)
     source = Column(String, default="web")
-    review_status = Column(String, default="Pending Review")
+    review_status = Column(String, default="pending")
     extraction_status = Column(String, default="1 of 1")
     task_type = Column(String)
     created_at = Column(
         String, 
         default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     )
+    notification_seen = Column(Integer, default=0)
 
 class Feedback(Base):
     """
@@ -66,6 +67,21 @@ class ChurnPrediction(Base):
     user_id = Column(Integer)
     dataset_id = Column(Integer, nullable=True)
     prediction = Column(String)
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
+
+class Notification(Base):
+    """
+    Dedicated table for professional system notifications (e.g., Progress, Success).
+    """
+    __tablename__ = "notifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    message = Column(String)
+    is_read = Column(Integer, default=0) # 0 = Unread, 1 = Read
     created_at = Column(
         String, 
         default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
