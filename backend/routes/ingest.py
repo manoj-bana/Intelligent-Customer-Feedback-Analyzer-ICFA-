@@ -84,6 +84,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     if not text_col:
                         text_col = chunk_df.select_dtypes(include="object").columns[0]
                 
+                chunk_reviews = chunk_df[text_col].astype(str).tolist()
                 chunk_results = batch_analyze_sentiment(chunk_reviews)
                 
                 # Convert chunk to list of dicts for easier preview management
