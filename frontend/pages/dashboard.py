@@ -380,14 +380,16 @@ def render_cases_fragment(cases_data):
         st.info("No cases found. Navigate to `Document Ingestion` to upload your first dataset!")
         return
 
+    # Standardized callback-based clear
+    def clear_dashboard_search():
+        st.session_state.dash_search_in = ""
+
     # Dual-column Search and Clear Interface (Pre-instantiation order)
     s_col1, s_col2 = st.columns([10, 2])
     
     with s_col2:
         st.write("<div style='height:31px'></div>", unsafe_allow_html=True)
-        if st.button("✖️ Clear", use_container_width=True, key="clear_search_btn"):
-             st.session_state.dash_search_in = ""
-             st.rerun(scope="fragment")
+        st.button("✖️ Clear", use_container_width=True, key="clear_search_btn", on_click=clear_dashboard_search)
 
     with s_col1:
         search = st.text_input("🔍 Search reports...", placeholder="Enter ID, filename, or type...", key="dash_search_in")

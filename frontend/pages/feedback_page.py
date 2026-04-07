@@ -237,6 +237,10 @@ def render_user_aggregation_fragment_v2(agg_df_all):
         st.divider()
         return
     
+    # Define clear callback for search reset
+    def clear_agg_search():
+        st.session_state.agg_q_in = ""
+
     with st.container(border=True):
         c_in, c_search, c_clear = st.columns([3, 1, 1])
         with c_in:
@@ -244,9 +248,7 @@ def render_user_aggregation_fragment_v2(agg_df_all):
         with c_search:
             st.button("🔍 Search", use_container_width=True, key="btn_agg_search")
         with c_clear:
-            if st.button("🗑️ Clear", use_container_width=True, key="btn_agg_clear"):
-                st.session_state.agg_q_in = ""
-                st.rerun(scope="fragment")
+            st.button("🗑️ Clear", use_container_width=True, key="btn_agg_clear", on_click=clear_agg_search)
 
     agg_df = agg_df_all.copy()
     
