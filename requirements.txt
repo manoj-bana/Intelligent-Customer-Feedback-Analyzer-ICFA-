@@ -23,3 +23,4 @@ openpyxl
 vaderSentiment
 pytest
 google-genai
+streamlit-autorefresh
