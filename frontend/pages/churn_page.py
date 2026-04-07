@@ -76,7 +76,7 @@ def show():
         case_id = case_mapping[selected_case_label]
         with st.spinner("Preparing predictive report..."):
             try:
-                res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=30)
+                res = requests.get(f"{API_URL}/ingest/results/{case_id}", timeout=120)
                 if res.status_code == 200:
                     results_data = res.json()
                     st.session_state.churn_results = results_data

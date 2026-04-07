@@ -161,7 +161,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
 
         out_results = {}
         if task_type == "Sentiment Analysis":
-            CHUNK_SIZE, MAX_ROWS = 5000, 100_000 
+            CHUNK_SIZE, MAX_ROWS = 5000, 500_000 
             text_col = date_col = None
             total = positive = negative = neutral = 0
             results_preview, review_texts_full, enriched_chunks = [], [], []
@@ -263,8 +263,8 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
         elif task_type == "Churn Prediction":
             total_customers = predicted_churn_total = 0
             all_predictions = []
-            for chunk_idx, chunk in enumerate(pd.read_csv(file_path, chunksize=1000)):
-                if chunk_idx >= 10: break
+            for chunk_idx, chunk in enumerate(pd.read_csv(file_path, chunksize=5000)):
+                if chunk_idx >= 100: break # Process up to 500,000 rows for churn
                 results = predict_churn(chunk)
                 if "error" in results:
                     if chunk_idx == 0: out_results = results
