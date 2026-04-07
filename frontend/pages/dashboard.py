@@ -218,7 +218,7 @@ def show():
                     with cv:
                         if n["is_read"] == 0:
                             if st.button("✓", key=f"rd_{n['id']}_{i}"):
-                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun(scope="fragment")
+                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun()
                                 except: pass
                 st.divider()
                 st.caption("Latest events shown.")
@@ -470,13 +470,13 @@ def render_cases_fragment(cases_data):
     with pg1:
         if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, width='stretch', key="pg_prev_btn"):
             st.session_state.current_page -= 1
-            st.rerun(scope="fragment")
+            st.rerun()
     with pg2:
         st.markdown(f"<div style='text-align: center; font-size: 0.9rem; opacity: 0.7;'>Page {st.session_state.current_page} of {total_pages}</div>", unsafe_allow_html=True)
     with pg3:
         if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, width='stretch', key="pg_next_btn"):
             st.session_state.current_page += 1
-            st.rerun(scope="fragment")
+            st.rerun()
             
     st.markdown("---")
 

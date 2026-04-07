@@ -47,8 +47,11 @@ def _build_line_chart(trend_data_tuple):
     return fig
 
 def generate_sentiment_line_chart(df):
+    # More robust date column detection
     # First exact math
-    date_col = next((col for col in ['date', 'timestamp', 'created_at', 'time'] if col.lower() in [c.lower() for c in df.columns]), None)
+    date_candidates = ['date', 'timestamp', 'created_at', 'time', 'review date', 'review_date', 'year', 'dt']
+    date_col = next((col for col in date_candidates if col.lower() in [c.lower() for c in df.columns]), None)
+    
     
     # Fallback substring match (e.g., 'ReviewDate', 'CreationTime')
     if not date_col:
@@ -77,7 +80,7 @@ def generate_sentiment_line_chart(df):
             # Convert to tuple of tuples for caching
             trend_tuple = tuple(trend.itertuples(index=False, name=None))
             fig = _build_line_chart(trend_tuple)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info(f"No valid dates found in column '{actual_date_col}' for Sentiment Over Time chart.")
     else:
