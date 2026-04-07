@@ -49,10 +49,12 @@ def show():
     
     # Connection Status Check using /health endpoint
     try:
-        requests.get(f"{API_URL}/health", timeout=1)
+        # Increased timeout to 3 seconds and bypass local proxies
+        requests.get(f"{API_URL}/health", timeout=3, proxies={"http": None, "https": None})
         status = '🟢 System Online'
-    except Exception:
-        status = '🔴 System Offline'
+    except Exception as e:
+        # Output exception for debugging if still offline
+        status = f'🔴 System Offline ({type(e).__name__})'
     
     st.sidebar.markdown(f"**Status:** {status}")
 

@@ -47,13 +47,19 @@ def _build_line_chart(trend_data_tuple):
     return fig
 
 def generate_sentiment_line_chart(df):
-    date_col = next((col for col in ['date', 'timestamp', 'created_at', 'time'] if col.lower() in [c.lower() for c in df.columns]), None)
+    # More robust date column detection
+    date_candidates = ['date', 'timestamp', 'created_at', 'time', 'review date', 'review_date', 'year', 'dt']
+    date_col = next((col for col in date_candidates if col.lower() in [c.lower() for c in df.columns]), None)
+    
     if date_col:
         actual_date_col = next(col for col in df.columns if col.lower() == date_col.lower())
         
+        # Ensure it's numeric for epoch conversion
+        temp_date_series = pd.to_numeric(df[actual_date_col], errors='coerce')
+        
         # In case the time column is unix epoch (like in Amazon datasets)
-        if pd.api.types.is_numeric_dtype(df[actual_date_col]):
-            df['date_only'] = pd.to_datetime(df[actual_date_col], unit='s', errors='coerce').dt.date
+        if not temp_date_series.isna().all():
+            df['date_only'] = pd.to_datetime(temp_date_series, unit='s', errors='coerce').dt.date
         else:
             df['date_only'] = pd.to_datetime(df[actual_date_col], errors='coerce').dt.date
             
@@ -65,9 +71,9 @@ def generate_sentiment_line_chart(df):
             # Convert to tuple of tuples for caching
             trend_tuple = tuple(trend.itertuples(index=False, name=None))
             fig = _build_line_chart(trend_tuple)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No valid dates found for Sentiment Over Time chart.")
+            st.info("No valid dates found in the detected timeline column.")
     else:
         st.info("No timeline data (date/time column) available for Sentiment Over Time chart.")
 

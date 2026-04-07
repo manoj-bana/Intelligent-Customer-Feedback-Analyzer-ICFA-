@@ -8,12 +8,18 @@ import uuid
 import shutil
 import json
 import base64
+import csv
+from dotenv import load_dotenv
+import google.genai as genai
+from google.genai import types
 from sqlalchemy.orm import Session
 from backend.database.db import SessionLocal
 from backend.database.models import User, Dataset
-from backend.utils.sentiment import analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf
+from backend.utils.sentiment import analyze_sentiment, batch_analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf
 from backend.utils.churn_model import predict_churn
 
+load_dotenv()
+gemini_client = genai.Client()
 
 router = APIRouter()
 UPLOAD_DIR = "uploads"
@@ -61,6 +67,15 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 if rows_processed >= MAX_ROWS:
                     break
 
+                # Progress update in DB
+                try:
+                    db.query(Dataset).filter(Dataset.case_id == case_id).update({
+                        "extraction_status": f"Processing row {rows_processed}..."
+                    })
+                    db.commit()
+                except:
+                    db.rollback()
+
                 if text_col is None:
                     for col in chunk_df.columns:
                         if any(k in col.lower() for k in ["review", "feedback", "comment", "text"]):
@@ -69,25 +84,26 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     if not text_col:
                         text_col = chunk_df.select_dtypes(include="object").columns[0]
                 
-                chunk_reviews = chunk_df[text_col].fillna("").tolist()
-                chunk_labels, chunk_scores = [], []
-                for idx, review in enumerate(chunk_reviews):
-                    sentiment = analyze_sentiment(str(review))
-                    chunk_labels.append(sentiment["label"])
-                    chunk_scores.append(sentiment["score"])
+                chunk_results = batch_analyze_sentiment(chunk_reviews)
+                
+                # Convert chunk to list of dicts for easier preview management
+                chunk_dicts = chunk_df.to_dict(orient="records")
+                
+                for idx, res in enumerate(chunk_results):
                     total += 1
-                    if sentiment["label"] == "POSITIVE":
-                        positive += 1
-                    elif sentiment["label"] == "NEGATIVE":
-                        negative += 1
-                    else:
-                        neutral += 1
-                        
+                    if res["label"] == "POSITIVE": positive += 1
+                    elif res["label"] == "NEGATIVE": negative += 1
+                    else: neutral += 1
+                    
                     if len(results_preview) < 10000:
-                        results_preview.append({"review": str(review), **sentiment})
-                        review_texts_preview.append(str(review))
+                        # Include BOTH original columns and sentiment results
+                        full_record = chunk_dicts[idx].copy()
+                        full_record.update(res)
+                        results_preview.append(full_record)
+                        review_texts_preview.append(str(full_record.get(text_col, "")))
                         
-                chunk_df["SentimentLabel"], chunk_df["SentimentScore"] = chunk_labels, chunk_scores
+                chunk_df["SentimentLabel"] = [r["label"] for r in chunk_results]
+                chunk_df["SentimentScore"] = [r["score"] for r in chunk_results]
                 enriched_chunks.append(chunk_df)
                 rows_processed += len(chunk_df)
 
@@ -153,23 +169,27 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             total_customers = predicted_churn_total = 0
             all_predictions = []
             for chunk_idx, chunk in enumerate(pd.read_csv(file_path, chunksize=1000)):
-                if chunk_idx >= 10:
-                    break
+                # Progress update
+                try:
+                    db.query(Dataset).filter(Dataset.case_id == case_id).update({
+                        "extraction_status": f"Churn Prediction: chunk {chunk_idx + 1}..."
+                    })
+                    db.commit()
+                except: db.rollback()
+
                 results = predict_churn(chunk)
                 if "error" in results:
-                    if chunk_idx == 0:
-                        out_results = results
+                    if chunk_idx == 0: out_results = results
                     break
                 total_customers += results.get("total_customers", 0)
                 predicted_churn_total += results.get("predicted_churn", 0)
-                if len(all_predictions) < 1000:
-                    all_predictions.extend(results.get("predictions", []))
+                all_predictions.extend(results.get("predictions", []))
 
             out_results = {
                 "total_customers": total_customers,
                 "predicted_churn": predicted_churn_total,
                 "churn_rate": round(predicted_churn_total / total_customers * 100, 2) if total_customers > 0 else 0.0,
-                "predictions": all_predictions[:1000]
+                "predictions": all_predictions # Return full list to the results JSON, pagination handled at API level
             }
             
         results_path = f"{file_path}_results.json"
@@ -177,6 +197,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             json.dump(out_results, f)
 
         dataset.review_status = "Completed"
+        dataset.extraction_status = "Complete"
         db.commit()
 
     except Exception as e:
@@ -188,7 +209,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             db.rollback()
     finally:
         db.close()
-
+    
 
 # ---------------------------------------------------------------------------
 # Existing Endpoints (CSV/XLSX direct upload — unchanged)
@@ -239,6 +260,111 @@ def upload_dataset(
         )
         return {"message": "File uploaded", "case_id": new_ds.case_id, "filename": new_ds.filename}
 
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+def process_image_extraction_background(case_id: str, image_path: str, content_type: str, task_type: str):
+    """
+    Background worker for OCR extraction and subsequent data analysis.
+    """
+    db = SessionLocal()
+    try:
+        dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
+        if not dataset:
+            return
+
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+
+        prompt = "This image contains a data table. Extract ALL rows and columns exactly as shown without skipping or summarizing anything. Return only valid CSV text with headers in the first row. IMPORTANT: Any text field containing commas MUST be wrapped in double quotes. No explanation, no markdown, no code blocks — just raw CSV."
+        
+        response = gemini_client.models.generate_content(
+            model="gemini-2.0-flash", # Corrected Model ID
+            contents=[prompt, types.Part.from_bytes(data=image_bytes, mime_type=content_type)]
+        )
+        csv_text = response.text.strip()
+        
+        if csv_text.startswith("```"):
+            lines = csv_text.splitlines()
+            if lines[0].startswith("```"): lines = lines[1:]
+            if lines and lines[-1].startswith("```"): lines = lines[:-1]
+            csv_text = "\n".join(lines).strip()
+
+        # Validate CSV briefly
+        list(csv.reader(io.StringIO(csv_text)))
+        
+        # Save CSV and update dataset record
+        csv_path = image_path.rsplit('.', 1)[0] + ".csv"
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write(csv_text)
+            
+        dataset.file_path = csv_path
+        dataset.review_status = "Analyzing..."
+        db.commit()
+
+        # Now trigger the actual analysis
+        process_case_background(case_id, csv_path, task_type)
+
+    except Exception as e:
+        db.rollback()
+        db.query(Dataset).filter(Dataset.case_id == case_id).update({"review_status": f"Extraction Error: {str(e)[:100]}"})
+        db.commit()
+    finally:
+        db.close()
+        if os.path.exists(image_path):
+            try: os.remove(image_path) # Cleanup raw image after extraction
+            except: pass
+
+@router.post("/upload-image")
+def upload_image(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    username: str = Form(...),
+    task_type: str = Form(...)
+):
+    """
+    Queues an image for OCR extraction and analysis. Returns 202 immediately.
+    """
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
+        temp_image_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")
+
+        with open(temp_image_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        new_ds = Dataset(
+            case_id=case_id,
+            user_id=user.id,
+            filename=f"{file.filename.rsplit('.', 1)[0]}.csv",
+            file_path=temp_image_path,
+            source="image",
+            review_status="Extracting Table...",
+            extraction_status="OCR in progress",
+            task_type=task_type
+        )
+        db.add(new_ds)
+        db.commit()
+
+        background_tasks.add_task(
+            process_image_extraction_background,
+            case_id=case_id,
+            image_path=temp_image_path,
+            content_type=file.content_type or 'image/png',
+            task_type=task_type
+        )
+        return {"message": "Image queued for extraction", "case_id": case_id}
+
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -339,9 +465,9 @@ def retry_case(case_id: str, background_tasks: BackgroundTasks):
 
 
 @router.get("/results/{case_id}")
-def get_case_results(case_id: str):
+def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str = ""):
     """
-    Retrieve analysis results for a completed case.
+    Retrieve analysis results with server-side pagination and search.
     """
     db = SessionLocal()
     try:
@@ -354,7 +480,37 @@ def get_case_results(case_id: str):
             raise HTTPException(status_code=404, detail="Results not ready")
 
         with open(results_path, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+
+        # Handle Pagination/Search for 'results' or 'predictions' lists
+        list_key = "results" if "results" in data else "predictions"
+        if list_key in data:
+            full_list = data[list_key]
+            
+            # Apply Search
+            if search:
+                query = search.lower()
+                full_list = [
+                    item for item in full_list 
+                    if any(query in str(v).lower() for v in item.values())
+                ]
+            
+            total_count = len(full_list)
+            start = (page - 1) * limit
+            end = start + limit
+            
+            data[list_key] = full_list[start:end]
+            data["pagination"] = {
+                "total": total_count,
+                "page": page,
+                "limit": limit,
+                "total_pages": (total_count - 1) // limit + 1
+            }
+            
+            # Remove giant CSV if it's not the download request (optional optimization)
+            # if limit < 100: data.pop("enriched_csv", None)
+            
+        return data
     finally:
         db.close()
 
