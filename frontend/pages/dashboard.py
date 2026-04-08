@@ -321,8 +321,16 @@ def render_cases_fragment(cases_data):
             type_opts = ["All"] + sorted(df_cases["task_type"].dropna().unique().tolist())
             type_filter = st.selectbox("Report Type", type_opts, key="filter_type", on_change=reset_page)
 
+    # 1. NEW: Quick Search Bar for File Name or Case ID
+    search_query = st.text_input("🔍 Search File Name or Case ID", placeholder="Enter name or ID to find a dataset...", key="search_cases", on_change=reset_page)
+
     # Apply filtration masks
     mask = (df_cases["created_date"].dt.date >= date_from) & (df_cases["created_date"].dt.date <= date_to)
+    
+    # 2. NEW: Filter by Search Query
+    if search_query:
+        mask &= (df_cases["filename"].str.contains(search_query, case=False, na=False)) | \
+                (df_cases["case_id"].str.contains(search_query, case=False, na=False))
     if status_filter != "All":
         mask &= (df_cases["review_status"] == status_filter)
     if type_filter != "All":
@@ -416,88 +424,94 @@ def render_cases_fragment(cases_data):
     st.divider()
     
     # --- Dataset Management ---
-    if cases_data:
-        st.subheader("🗑️ Manage & Delete Datasets")
-        st.markdown("Select a dataset below to delete it from the system or retry stalled processing.")
-        
-        # All cases are now manageable
-        case_lookup = {c['case_id']: c for c in cases_data}
-        case_mapping = {f"{c['filename']} (ID: {c['case_id']}, Status: {c['review_status']})": c['case_id'] for c in cases_data}
-        
-        selected_case_label = st.selectbox("Select Dataset to Manage", list(case_mapping.keys()), key="manage_case_selector")
-        selected_case_id = case_mapping[selected_case_label]
-        selected_case = case_lookup[selected_case_id]
-        
-        col_act1, col_act2, col_act3 = st.columns([1.5, 2.5, 2.5])
-        with col_act1:
-            # Only show Retry button for stalled/error cases
-            if "Completed" not in selected_case["review_status"]:
-                if st.button("🔄 Retry", width='stretch', key="btn_retry_case"):
+    # Filtered management based on the Search Bar above
+    managed_cases = df_filtered.to_dict('records') # Only show results that match our filters/search
+    
+    if not managed_cases:
+        st.info("No matching datasets found to manage.")
+        return
+
+    # Case Mapping for the dropdown (only from filtered results)
+    case_lookup = {c['Case ID']: c for c in managed_cases}
+    case_mapping = {f"{c['File Name']} - (ID: {c['Case ID']}, Status: {c['Review Status']})": c['Case ID'] for c in managed_cases}
+    
+    # If there's only one search result, auto-select it for the user
+    default_index = 0 if len(case_mapping) == 1 else 0
+    
+    selected_case_label = st.selectbox("🎯 Select Targeted File to Delete/Manage", list(case_mapping.keys()), key="manage_case_selector", index=default_index)
+    selected_case_id = case_mapping[selected_case_label]
+    selected_case = case_lookup[selected_case_id]
+    
+    col_act1, col_act2, col_act3 = st.columns([1.5, 2.5, 2.5])
+    with col_act1:
+        # Only show Retry button for stalled/error cases
+        if "Completed" not in selected_case["Review Status"]:
+            if st.button("🔄 Retry", width='stretch', key="btn_retry_case"):
+                try:
+                    retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", timeout=5)
+                    if retry_res.status_code == 200:
+                        st.success("Task added back to queue!")
+                        st.rerun()
+                    else:
+                        st.error(f"Server error: {retry_res.text}")
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+        else:
+            if st.button("📊 View Reports", width='stretch', key=f"btn_go_report_{selected_case_id}"):
+                st.query_params["page"] = "📊 Reports"
+                st.rerun()
+            
+    with col_act2:
+        # Check if this specific case ID is currently in the 'confirmation' state
+        if st.session_state.get('confirm_delete_id') == selected_case_id:
+            st.warning(f"⚠️ Delete **{selected_case['File Name']}**?")
+            cy, cn = st.columns(2)
+            with cy:
+                if st.button("✅ Yes", key=f"btn_dy_{selected_case_id}", width='stretch'):
                     try:
-                        retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", timeout=5)
-                        if retry_res.status_code == 200:
-                            st.success("Task added back to queue!")
+                        del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
+                        if del_res.status_code == 200:
+                            st.session_state.confirm_delete_id = None
+                            get_cases.clear()
+                            st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
                             st.rerun()
                         else:
-                            st.error(f"Server error: {retry_res.text}")
+                            st.error(f"Server error: {del_res.text}")
                     except Exception as e:
                         st.error(f"Connection error: {e}")
-            else:
-                if st.button("📊 View Reports", width='stretch', key=f"btn_go_report_{selected_case_id}"):
-                    st.query_params["page"] = "📊 Reports"
+            with cn:
+                if st.button("❌ No", key=f"btn_dn_{selected_case_id}", width='stretch'):
+                    st.session_state.confirm_delete_id = None
                     st.rerun()
-                
-        with col_act2:
-            # Check if this specific case ID is currently in the 'confirmation' state
-            if st.session_state.get('confirm_delete_id') == selected_case_id:
-                st.warning(f"⚠️ Delete **{selected_case['filename']}**?")
-                cy, cn = st.columns(2)
-                with cy:
-                    if st.button("✅ Yes", key=f"btn_dy_{selected_case_id}", width='stretch'):
-                        try:
-                            del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
-                            if del_res.status_code == 200:
-                                st.session_state.confirm_delete_id = None
-                                get_cases.clear()
-                                st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
-                                st.rerun()
-                            else:
-                                st.error(f"Server error: {del_res.text}")
-                        except Exception as e:
-                            st.error(f"Connection error: {e}")
-                with cn:
-                    if st.button("❌ No", key=f"btn_dn_{selected_case_id}", width='stretch'):
-                        st.session_state.confirm_delete_id = None
-                        st.rerun()
-            else:
-                if st.button("🗑️ Delete Selected", key=f"btn_del_{selected_case_id}", width='stretch'):
-                    st.session_state.confirm_delete_id = selected_case_id
-                    st.rerun()
+        else:
+            if st.button("🗑️ Delete Selected", key=f"btn_del_{selected_case_id}", width='stretch'):
+                st.session_state.confirm_delete_id = selected_case_id
+                st.rerun()
 
-        with col_act3:
-            # Delete All Confirmation Logic
-            if st.session_state.get('confirm_delete_all'):
-                st.error("🚨 Delete ALL datasets?")
-                ay, an = st.columns(2)
-                with ay:
-                    if st.button("💥 YES, ALL", key="btn_del_all_confirm", width='stretch'):
-                        try:
-                            username = st.session_state.get("username", "")
-                            del_all_res = requests.delete(f"{API_URL}/ingest/cases/all/{username}", timeout=10)
-                            if del_all_res.status_code == 200:
-                                st.session_state.confirm_delete_all = False
-                                get_cases.clear()
-                                st.toast("All datasets deleted!", icon="🚨")
-                                st.rerun()
-                            else:
-                                st.error(f"Server error: {del_all_res.text}")
-                        except Exception as e:
-                            st.error(f"Connection error: {e}")
-                with an:
-                    if st.button("🛑 Stop", key="btn_del_all_cancel", width='stretch'):
-                        st.session_state.confirm_delete_all = False
-                        st.rerun()
-            else:
-                if st.button("🚨 Delete All Once", key="btn_delete_all_trigger", width='stretch', type="secondary"):
-                    st.session_state.confirm_delete_all = True
+    with col_act3:
+        # Delete All Confirmation Logic
+        if st.session_state.get('confirm_delete_all'):
+            st.error("🚨 Delete ALL datasets?")
+            ay, an = st.columns(2)
+            with ay:
+                if st.button("💥 YES, ALL", key="btn_del_all_confirm", width='stretch'):
+                    try:
+                        username = st.session_state.get("username", "")
+                        del_all_res = requests.delete(f"{API_URL}/ingest/cases/all/{username}", timeout=10)
+                        if del_all_res.status_code == 200:
+                            st.session_state.confirm_delete_all = False
+                            get_cases.clear()
+                            st.toast("All datasets deleted!", icon="🚨")
+                            st.rerun()
+                        else:
+                            st.error(f"Server error: {del_all_res.text}")
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            with an:
+                if st.button("🛑 Stop", key="btn_del_all_cancel", width='stretch'):
+                    st.session_state.confirm_delete_all = False
                     st.rerun()
+        else:
+            if st.button("🚨 Delete All Once", key="btn_delete_all_trigger", width='stretch', type="secondary"):
+                st.session_state.confirm_delete_all = True
+                st.rerun()
