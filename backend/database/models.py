@@ -14,10 +14,28 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True)
     password = Column(String)
+    role = Column(String, default="user") # user, admin
+    is_active = Column(Integer, default=1) # 1 = Active, 0 = Deactivated
     security_question = Column(String, nullable=True)
     security_answer_hash = Column(String, nullable=True)
     reset_token = Column(String, nullable=True)
     reset_token_expiry = Column(String, nullable=True)
+
+class AdminRequest(Base):
+    """
+    Tracks user requests for administrative privilege elevation.
+    """
+    __tablename__ = "admin_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    username = Column(String)
+    reason = Column(String)
+    status = Column(String, default="pending") # pending, approved, rejected
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
 
 class Dataset(Base):
     """

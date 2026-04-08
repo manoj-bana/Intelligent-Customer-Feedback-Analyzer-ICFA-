@@ -6,7 +6,14 @@ from streamlit_autorefresh import st_autorefresh
 from frontend.errors import ERROR_MESSAGES
 import re
 
-API_URL = "http://127.0.0.1:8000"
+import os
+from dotenv import load_dotenv
+
+# Robust .env loading - look for it in the project root relative to this file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(env_path)
+
+API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 def get_notifications(username):
     """
@@ -18,6 +25,16 @@ def get_notifications(username):
             return res.json().get("notifications", [])
     except: pass
     return []
+
+def nav_link(label, target, current_page):
+    """
+    Helper to render sidebar navigation buttons with active-state styling.
+    """
+    # Use 'primary' type for the currently active page to highlight it
+    is_active = (current_page == target)
+    if st.sidebar.button(label, use_container_width=True, type="primary" if is_active else "secondary"):
+        st.query_params["page"] = target
+        st.rerun()
 
 def inject_premium_css():
     """Injects high-end enterprise styling for glassmorphism and extreme layout density."""
@@ -83,30 +100,33 @@ def show():
     role = st.session_state.get("role", "user")
 
     # --- Sidebar UI ---
-    with st.sidebar.container(border=True):
-        st.markdown(f"<h3 style='margin-bottom: 0px;'>👤 {username}</h3>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size:0.85rem; color:gray; padding-bottom: 10px;'>🟢 Logged in ({role.capitalize()})</p>", unsafe_allow_html=True)
-        if st.sidebar.button("⚙️ Manage Profile", use_container_width=True, key="btn_side_profile"):
-            st.query_params["page"] = "👤 Manage Profile"
-            st.rerun()
+    st.sidebar.markdown(f"<div style='text-align: center; padding-bottom: 10px;'><h3>👤 {username}</h3><p style='font-size:0.8rem; color:gray; margin-top:-15px;'>{role.capitalize()} • Online</p></div>", unsafe_allow_html=True)
+    nav_link("⚙️ Manage Profile", "👤 Manage Profile", query_page)
+    st.sidebar.divider()
 
-    st.sidebar.markdown("### 📌 Navigation")
-    pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
-    
-    # Find current page index for radio
-    current_nav_page = query_page if query_page in pages else "🏠 Home"
-    page_index = pages.index(current_nav_page)
-    
-    selected_page = st.sidebar.radio("Navigate to:", pages, index=page_index, label_visibility="collapsed")
-    
-    # Simple navigation logic
-    if st.query_params.get("page") != selected_page and query_page != "👤 Manage Profile":
-        st.query_params["page"] = selected_page
-        st.rerun()
-    elif query_page == "👤 Manage Profile" and selected_page != pages[pages.index(current_nav_page)]:
-         # If coming back from profile page
-         st.query_params["page"] = selected_page
-         st.rerun()
+    # Collapsible Navigate Section
+    with st.sidebar.expander("📌 Navigate", expanded=(query_page in ["🏠 Home", "📄 Upload Feedback", "📊 Upload Churn Data"])):
+        nav_link("🏠 Home", "🏠 Home", query_page)
+        nav_link("📄 Feedbacks", "📄 Upload Feedback", query_page)
+        nav_link("📊 Churn", "📊 Upload Churn Data", query_page)
+
+    # Collapsible Analytics Section
+    with st.sidebar.expander("📊 Analytics", expanded=(query_page in ["💬 Sentiment Dashboard", "📉 Churn Insights", "🔑 Keyword Analysis", "📈 Trends (NEW)"])):
+        nav_link("💬 Sentiment", "💬 Sentiment Dashboard", query_page)
+        nav_link("📉 Churn", "📉 Churn Insights", query_page)
+        # nav_link("🔑 Keywords", "🔑 Keyword Analysis", query_page)
+        # nav_link("📈 Trends", "📈 Trends (NEW)", query_page)
+
+    # Collapsible Management Section
+    # with st.sidebar.expander("📂 Management", expanded=(query_page in ["📁 Upload History (NEW)", "📋 My Reports"])):
+        # nav_link("📁 History", "📁 Upload History (NEW)", query_page)
+        # nav_link("📋 Reports", "📋 My Reports", query_page)
+
+    # Collapsible System Options (Admin Only)
+    if role == "admin":
+        with st.sidebar.expander("👑 Admin Control", expanded=(query_page in ["👑 Admin Panel", "👥 Manage Users"])):
+            nav_link("👑 Panel", "👑 Admin Panel", query_page)
+            nav_link("👥 Users", "👥 Manage Users", query_page)
 
     # Reduced spacer to bring logout closer to navigation
     st.sidebar.markdown("<div style='height: 5vh;'></div>", unsafe_allow_html=True)
@@ -199,7 +219,7 @@ def show():
                     with cv:
                         if n["is_read"] == 0:
                             if st.button("✓", key=f"rd_{n['id']}_{i}"):
-                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun(scope="fragment")
+                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun()
                                 except: pass
                 st.divider()
                 st.caption("Latest events shown.")
@@ -222,9 +242,10 @@ def show():
     elif query_page == "🔔 Notifications":
         st.title("🔔 Notifications Center")
         st.info("Check back soon for advanced real-time alerts. Use the bell icon at the top right for now.")
-    elif query_page in ["👑 Admin Panel", "👥 Manage Users"]:
-        st.title(query_page)
-        st.warning("Admin UI module not fully implemented yet. Please manage users directly via the backend database.")
+    elif query_page == "👑 Admin Panel":
+        show_admin_panel()
+    elif query_page == "👥 Manage Users":
+        show_manage_users()
     # Default
     else: show_home()
 
@@ -236,13 +257,22 @@ def show_home():
     st.title("📊 ICFA Analytics Master")
     st.markdown(f"**Welcome back,** {username} 👋")
 
+    role = st.session_state.get("role", "user")
+    if role == "user":
+        st.info("💡 **Tip:** Need to manage other users or see all system datasets? [Request Admin Access](/?page=👤%20Manage%20Profile)")
+
     # Call the isolated auto-refreshing fragment
     render_live_home_metrics(username)
 
 @st.fragment(run_every=5)
 def render_live_home_metrics(username):
     # Fetch live data internally so the numbers ACTUALLY update across polling!
-    cases_data = get_cases(username)
+    role = st.session_state.get("role", "user")
+    if role == "admin":
+        cases_data = get_admin_cases(username)
+    else:
+        cases_data = get_cases(username)
+        
     total_datasets = len(cases_data)
     pending = len([c for c in cases_data if str(c.get("review_status")).lower() == "pending"])
     processing = len([c for c in cases_data if str(c.get("review_status")).lower() == "processing"])
@@ -314,6 +344,27 @@ def show_profile_management():
                     else: st.error(f"❌ {res.json().get('detail', 'Update failed')}")
                 except: st.error("❌ Service error. Please try later.")
 
+    # Privilege elevation section for regular users
+    role = st.session_state.get("role", "user")
+    if role == "user":
+        st.divider()
+        with st.container(border=True):
+            st.subheader("👑 Request Admin Privileges")
+            st.markdown("Need more power? Request administrative access to manage users and system-wide data.")
+            reason = st.text_area("Reason for elevation", placeholder="e.g. Need to manage department datasets...", key="admin_req_reason")
+            if st.button("🚀 Submit Request", use_container_width=True):
+                if not reason:
+                    st.warning("Please provide a reason.")
+                else:
+                    try:
+                        res = requests.post(f"{API_URL}/auth/request-admin", json={"username": username, "reason": reason}, timeout=5)
+                        if res.status_code == 200:
+                            st.success("✅ Request submitted! Please wait for approval.")
+                        else:
+                            st.error(f"❌ {res.json().get('detail', 'Submission failed')}")
+                    except:
+                        st.error("❌ Service offline.")
+
 
 
 
@@ -337,8 +388,7 @@ def show_reports_tab():
 
 def get_cases(username):
     """
-    Fetches the latest analysis cases from the backend. 
-    Caching removed to ensure 100% status-notification synchronization.
+    Fetches the latest analysis cases for the current user.
     """
     try:
         res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
@@ -348,7 +398,17 @@ def get_cases(username):
         pass
     return []
 
-    pass
+def get_admin_cases(admin_username):
+    """
+    Fetches EVERY case in the system (Admin only).
+    """
+    try:
+        res = requests.get(f"{API_URL}/ingest/admin/all-datasets", params={"admin_username": admin_username}, timeout=10)
+        if res.status_code == 200:
+            return res.json().get("datasets", [])
+    except Exception:
+        pass
+    return []
 
 @st.fragment
 def render_cases_fragment(cases_data):
@@ -409,7 +469,8 @@ def render_cases_fragment(cases_data):
         st.divider()
         c_id, c1, c2, c3, c4, c5 = st.columns([1.5, 3.5, 2, 1.5, 2, 1.5])
         c_id.caption(f"`{c['case_id']}`")
-        c1.markdown(f"<p style='font-size:0.9rem; margin-bottom:0;'><b>{c['filename']}</b></p>", unsafe_allow_html=True)
+        owner_name = f" • {c['username']}" if 'username' in c else ""
+        c1.markdown(f"<p style='font-size:0.9rem; margin-bottom:0;'><b>{c['filename']}</b>{owner_name}</p>", unsafe_allow_html=True)
         c2.markdown(f"<p style='font-size:0.85rem; opacity:0.8; margin-bottom:0;'>{c['task_type'][:15]}..</p>" if len(c['task_type']) > 15 else f"<p style='font-size:0.85rem; opacity:0.8; margin-bottom:0;'>{c['task_type']}</p>", unsafe_allow_html=True)
         
         status = str(c.get("review_status")).lower()
@@ -451,13 +512,13 @@ def render_cases_fragment(cases_data):
     with pg1:
         if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, width='stretch', key="pg_prev_btn"):
             st.session_state.current_page -= 1
-            st.rerun(scope="fragment")
+            st.rerun()
     with pg2:
         st.markdown(f"<div style='text-align: center; font-size: 0.9rem; opacity: 0.7;'>Page {st.session_state.current_page} of {total_pages}</div>", unsafe_allow_html=True)
     with pg3:
         if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, width='stretch', key="pg_next_btn"):
             st.session_state.current_page += 1
-            st.rerun(scope="fragment")
+            st.rerun()
             
     st.markdown("---")
 
@@ -503,7 +564,9 @@ def render_cases_fragment(cases_data):
                 with cy:
                     if st.button("✅ Yes", key=f"btn_dy_{selected_case_id}", width='stretch'):
                         try:
-                            del_res = requests.delete(f"{API_URL}/ingest/cases/{selected_case_id}", timeout=5)
+                            role = st.session_state.get("role", "user")
+                            endpoint = f"/ingest/admin/datasets/{selected_case_id}" if role == "admin" else f"/ingest/cases/{selected_case_id}"
+                            del_res = requests.delete(f"{API_URL}{endpoint}", params={"admin_username": st.session_state.username} if role == "admin" else {}, timeout=5)
                             if del_res.status_code == 200:
                                 st.session_state.confirm_delete_id = None
                                 st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
@@ -547,3 +610,110 @@ def render_cases_fragment(cases_data):
                 if st.button("🚨 Delete All Once", key="btn_delete_all_trigger", width='stretch', type="secondary"):
                     st.session_state.confirm_delete_all = True
                     st.rerun()
+
+def show_admin_panel():
+    st.title("👑 Administrative Control Panel")
+    st.markdown("Review privilege elevation requests and system health.")
+    
+    admin_user = st.session_state.username
+    
+    # KPI Row for Admin
+    try:
+        users_res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, timeout=5)
+        total_users = len(users_res.json()["users"]) if users_res.status_code == 200 else 0
+        
+        req_res = requests.get(f"{API_URL}/auth/admin-requests", params={"admin_username": admin_user}, timeout=5)
+        requests_list = req_res.json()["requests"] if req_res.status_code == 200 else []
+        pending_reqs = len([r for r in requests_list if r["status"] == "pending"])
+        
+        k1, k2, k3 = st.columns(3)
+        with k1: render_kpi_card("Total Users", total_users, "👥", "grad-total")
+        with k2: render_kpi_card("Pending Requests", pending_reqs, "⚖️", "grad-pending")
+        with k3: render_kpi_card("Server Status", "Online", "🛰️", "grad-completed")
+    except:
+        st.error("Admin service partially unavailable.")
+        requests_list = []
+
+    st.divider()
+    st.subheader("📥 Privilege Elevation Requests")
+    if not requests_list:
+        st.info("No requests found.")
+    else:
+        for r in requests_list:
+            with st.container(border=True):
+                r_col1, r_col2 = st.columns([3, 1])
+                with r_col1:
+                    st.markdown(f"**User:** {r['username']} | **Status:** `{r['status'].upper()}`")
+                    st.markdown(f"**Reason:** {r['reason']}")
+                    st.caption(f"Requested on {r['created_at']}")
+                with r_col2:
+                    if r["status"] == "pending":
+                        if st.button("✅ Approve", key=f"app_{r['id']}"):
+                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/approve", params={"admin_username": admin_user})
+                            st.rerun()
+                        if st.button("❌ Reject", key=f"rej_{r['id']}"):
+                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/reject", params={"admin_username": admin_user})
+                            st.rerun()
+
+def show_manage_users():
+    st.title("👥 User Directory")
+    st.markdown("Manage system access and roles.")
+    
+    admin_user = st.session_state.username
+    try:
+        res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, timeout=10)
+        users = res.json()["users"]
+        
+        # Display as a clean table
+        df_users = pd.DataFrame(users)
+        df_users["status"] = df_users["is_active"].apply(lambda x: "✅ Active" if x == 1 else "❌ Deactivated")
+        st.dataframe(df_users[["id", "username", "email", "role", "status"]], use_container_width=True, hide_index=True)
+        
+        st.divider()
+        st.subheader("🛡️ Revoke Admin Privileges")
+        st.markdown("Downgrade an administrator back to a regular user.")
+        admins = [u for u in users if u["role"] == "admin" and u["username"] != admin_user]
+        
+        if not admins:
+            st.info("No other administrators found to demote.")
+        else:
+            admin_to_demote = st.selectbox("Select Admin to Demote", [u["username"] for u in admins], key="sel_demote")
+            if st.button("🔽 Demote to User", use_container_width=True):
+                target_id = [u["id"] for u in admins if u["username"] == admin_to_demote][0]
+                dem_res = requests.post(f"{API_URL}/auth/users/{target_id}/demote", params={"admin_username": admin_user})
+                if dem_res.status_code == 200:
+                    st.success(f"Admin privileges revoked for {admin_to_demote}.")
+                    st.rerun()
+                else:
+                    st.error("Failed to demote user.")
+
+        st.divider()
+        st.subheader("👤 User Account Actions")
+        
+        col_m1, col_m2 = st.columns(2)
+        
+        with col_m1:
+            st.markdown("### 🔒 Deactivate")
+            user_to_del = st.selectbox("Select User to Deactivate", [u["username"] for u in users if u["username"] != admin_user and u["is_active"] == 1], key="sel_del")
+            if st.button("🚨 Deactivate Account", type="primary", use_container_width=True):
+                user_id = [u["id"] for u in users if u["username"] == user_to_del][0]
+                del_res = requests.delete(f"{API_URL}/auth/users/{user_id}", params={"admin_username": admin_user})
+                if del_res.status_code == 200:
+                    st.success(f"User {user_to_del} deactivated.")
+                    st.rerun()
+                else:
+                    st.error("Operation failed.")
+                    
+        with col_m2:
+            st.markdown("### 🔓 Reactivate")
+            user_to_react = st.selectbox("Select User to Restore", [u["username"] for u in users if u["is_active"] == 0], key="sel_react")
+            if st.button("✅ Reactivate Account", use_container_width=True):
+                user_id = [u["id"] for u in users if u["username"] == user_to_react][0]
+                react_res = requests.post(f"{API_URL}/auth/users/{user_id}/reactivate", params={"admin_username": admin_user})
+                if react_res.status_code == 200:
+                    st.success(f"User {user_to_react} restored.")
+                    st.rerun()
+                else:
+                    st.error("Operation failed.")
+    except Exception as e:
+        st.error(f"Could not connect to user registry: {e}")

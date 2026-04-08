@@ -25,17 +25,17 @@ wheels/
 venv/
 ENV/
 .vscode/
+.env
 
 # Database
 icfa.db
 *.sqlite3
 
 # Project Specific
-uploads/*
-!uploads/.gitkeep
-!uploads/temp/
-uploads/temp/*
-!uploads/temp/.gitkeep
+uploads/**
+!uploads/
+!uploads/**/
+!uploads/**/.gitkeep
 data/*.csv 
 .pytest_cache/
 .streamlit/

@@ -175,3 +175,24 @@ def extract_keywords_tfidf(texts: list, top_n: int = 15) -> list:
         ]
     except Exception:
         return extract_keywords_frequency(texts, top_n)
+
+def batch_analyze_sentiment(texts: list[str]) -> list[dict]:
+    """
+    Optimized batch sentiment analysis for a list of strings.
+    """
+    sia, _ = _get_resources()
+    results = []
+    for text in texts:
+        if not text or str(text).strip() == "":
+            results.append({"label": "NEUTRAL", "score": 0.5})
+            continue
+            
+        cleaned = str(text).lower()
+        scores = sia.polarity_scores(cleaned)
+        comp = scores["compound"]
+        label = "POSITIVE" if comp >= 0.05 else ("NEGATIVE" if comp <= -0.05 else "NEUTRAL")
+        results.append({
+            "label": label, 
+            "score": round((comp + 1.0) / 2.0, 3)
+        })
+    return results

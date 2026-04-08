@@ -133,6 +133,27 @@ def show():
         else:
             st.button("🚀 Upload & Process", use_container_width=True, type="primary", disabled=True)
 
+        st.write("")
+        st.subheader("Image Table Extraction (Beta)")
+        
+        task_type_image = st.selectbox(
+            "Select Processing Pipeline (Image)",
+            ["Sentiment Analysis", "Churn Prediction"],
+            key="img_task_type"
+        )
+        
+        uploaded_image = st.file_uploader(
+            "Select Image to Extract (JPG, PNG)",
+            type=["jpg", "jpeg", "png"],
+            key="img_uploader"
+        )
+        
+        if uploaded_image is not None:
+            if st.button("📸 Extract & Process", use_container_width=True, type="primary"):
+                _handle_image_upload(uploaded_image, task_type_image)
+        else:
+            st.button("📸 Extract & Process", use_container_width=True, type="primary", disabled=True)
+
 
 def _handle_csv_upload(uploaded_file, task_type: str):
     """
@@ -181,6 +202,54 @@ def _handle_csv_upload(uploaded_file, task_type: str):
                 st.session_state["file_processed"] = True
             else:
                 st.error(f"Ingestion failed: {response.text}")
+
+        except requests.exceptions.ConnectionError:
+            st.error("⚠️ Connection Error: Unable to reach the backend server.")
+        except Exception as e:
+            st.error(f"Unexpected error: {str(e)}")
+
+
+def _handle_image_upload(uploaded_file, task_type: str):
+    """
+    Handles image upload via the existing /upload-image endpoint.
+    """
+    with st.spinner("Extracting table from image… this may take a moment."):
+        try:
+            username = st.session_state.get("username", "")
+            if not username:
+                st.error("Authentication Error: Missing active session.")
+                return
+
+            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+            data = {"username": str(username), "task_type": task_type}
+
+            response = requests.post(
+                f"{API_URL}/ingest/upload-image",
+                files=files,
+                data=data,
+                timeout=60
+            )
+
+            if response.status_code == 200:
+                case_id = response.json().get("case_id")
+                
+                # Clear our data cache instantly so the dashboard updates without delay
+                try:
+                    from frontend.pages.dashboard import get_cases
+                    get_cases.clear()
+                except Exception:
+                    # Fallback to clearing all cache if local clear fails
+                    st.cache_data.clear()
+                
+                st.success(f"✅ Extraction and Upload successful! Tracking ID: **{case_id}**")
+                st.info(
+                    "The extracted data is now in the **Pending Review** queue and will be "
+                    "analyzed in the background. Check your Home dashboard for status updates."
+                )
+            elif response.status_code == 422:
+                st.error(f"Extraction failed: {response.json().get('detail', 'Could not extract a valid table from the image.')}")
+            else:
+                st.error(f"Upload failed: {response.text}")
 
         except requests.exceptions.ConnectionError:
             st.error("⚠️ Connection Error: Unable to reach the backend server.")
