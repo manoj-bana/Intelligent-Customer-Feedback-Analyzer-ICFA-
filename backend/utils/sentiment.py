@@ -99,6 +99,21 @@ def analyze_sentiment_label_score(text: str) -> tuple[str, float]:
     res = analyze_sentiment(text if isinstance(text, str) else "")
     return res["label"], res["score"]
 
+def batch_analyze_sentiment(texts: list) -> list:
+    """
+    High-performance batch processor for sentiment labels and scores.
+    """
+    sia, _ = _get_resources()
+    results = []
+    for text in texts:
+        if not text or str(text).strip() == "":
+            results.append({"label": "NEUTRAL", "score": 0.5})
+            continue
+        comp = sia.polarity_scores(str(text).lower())["compound"]
+        label = "POSITIVE" if comp >= 0.05 else ("NEGATIVE" if comp <= -0.05 else "NEUTRAL")
+        results.append({"label": label, "score": round((comp + 1.0) / 2.0, 3)})
+    return results
+
 def extract_keywords_frequency(texts: list, top_n: int = 15) -> list:
     """
     Extracts the most frequent keywords from a list of texts, excluding stop words.

@@ -11,7 +11,7 @@ import base64
 from sqlalchemy.orm import Session
 from backend.database.db import SessionLocal
 from backend.database.models import User, Dataset, Notification
-from backend.utils.sentiment import analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf
+from backend.utils.sentiment import analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf, batch_analyze_sentiment
 from backend.utils.churn_model import predict_churn
 
 router = APIRouter()
@@ -157,11 +157,10 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
         # STEP 1: PROCESSING START
         dataset.review_status = "processing"
         db.commit()
-        time.sleep(2) # Brief delay for guided UI visibility
 
         out_results = {}
         if task_type == "Sentiment Analysis":
-            CHUNK_SIZE, MAX_ROWS = 5000, 500_000 
+            CHUNK_SIZE, MAX_ROWS = 10000, 500_000 
             text_col = date_col = None
             total = positive = negative = neutral = 0
             results_preview, review_texts_full, enriched_chunks = [], [], []
@@ -180,14 +179,14 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 
                 user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
                 chunk_reviews = chunk_df[text_col].fillna("").astype(str).tolist()
-                chunk_results = [analyze_sentiment(r) for r in chunk_reviews]
+                chunk_results = batch_analyze_sentiment(chunk_reviews)
                 
-                for res in chunk_results:
-                    lbl = res["label"]
-                    total += 1
-                    if lbl == "POSITIVE": positive += 1
-                    elif lbl == "NEGATIVE": negative += 1
-                    else: neutral += 1
+                # Fast aggregation using vectorized labels
+                labels = [r["label"] for r in chunk_results]
+                total += len(labels)
+                positive += labels.count("POSITIVE")
+                negative += labels.count("NEGATIVE")
+                neutral += labels.count("NEUTRAL")
                 
                 review_texts_full.extend(chunk_reviews)
                 if len(results_preview) < 1000:
@@ -230,18 +229,22 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 print(f"Dataset unique {actual_user_col} values: {unique_ids[:10]}...")
                 print(f"Records matching dashboard user: {len(filtered_df)}")
                 
-                def get_dom_sent(x):
-                    m = x.mode(); return m[0] if not m.empty else "UNKNOWN"
-                def get_churn_score(x):
-                    tot = len(x); return round((x.str.upper() == 'NEGATIVE').sum() / tot, 2) if tot > 0 else 0.0
+                # Fast Vectorized User Engagement Aggregation
+                full_df['_is_neg'] = (full_df['sentiment_label'] == 'NEGATIVE').astype(int)
                 
-                # Aggregate ALL for the overview, highlighted for specific user later
-                agg_df = full_df.groupby(actual_user_col).agg(
+                agg_nums = full_df.groupby(actual_user_col).agg(
                     Total_Comments=(text_col, 'count'),
-                    Sentiment_Summary=('sentiment_label', get_dom_sent),
-                    Churn_Score=('sentiment_label', get_churn_score)
-                ).reset_index()
+                    Churn_Score=('_is_neg', 'mean')
+                ).round({'Churn_Score': 2})
+                
+                # Fast Mode Calculation (No python looping)
+                sent_mode = full_df.groupby([actual_user_col, 'sentiment_label']).size().reset_index(name='count')
+                sent_mode = sent_mode.sort_values(by=[actual_user_col, 'count'], ascending=[True, False]).drop_duplicates(actual_user_col)
+                sent_mode = sent_mode.set_index(actual_user_col)['sentiment_label']
+                
+                agg_df = agg_nums.join(sent_mode.rename('Sentiment_Summary')).reset_index()
                 agg_df.rename(columns={actual_user_col:'User ID', 'Total_Comments':'Total Comments', 'Sentiment_Summary':'Sentiment Summary', 'Churn_Score':'Churn Score'}, inplace=True)
+                
                 user_engagement = agg_df.to_dict(orient='records')
             else:
                 print(f"--- [ICFA DEBUG] No ID column found in dataset. ---")
@@ -255,8 +258,9 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
 
             out_results = {
                 "total": total, "positive": positive, "negative": negative, "neutral": neutral,
-                "results": results_preview[:1000], "freq_keywords": extract_keywords_frequency(review_texts_full[:5000], 15),
-                "tfidf_keywords": extract_keywords_tfidf(review_texts_full[:5000], 15),
+                "results": results_preview[:1000], 
+                "freq_keywords": extract_keywords_frequency(review_texts_full[:2000], 15),
+                "tfidf_keywords": extract_keywords_tfidf(review_texts_full[:2000], 15),
                 "user_engagement": user_engagement, "enriched_csv": csv_b64
             }
 

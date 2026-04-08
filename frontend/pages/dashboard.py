@@ -82,54 +82,35 @@ def show():
     query_page = st.query_params.get("page", "🏠 Home")
     role = st.session_state.get("role", "user")
 
-    # --- Sidebar UI Navigation Hub ---
-    def nav_link(label, page_name, current_page, is_indented=False):
-        is_active = (current_page == page_name)
-        prefix = "&nbsp;&nbsp;" if is_indented else ""
-        btn_label = f"{prefix}{label}"
-        
-        # Use a more compact styling for links
-        cols = st.sidebar.columns([12, 1])
-        with cols[0]:
-            if st.button(btn_label, use_container_width=True, type="primary" if is_active else "secondary", key=f"nav_{page_name}"):
-                st.query_params["page"] = page_name
-                st.rerun()
-
     # --- Sidebar UI ---
-    st.sidebar.markdown(f"<div style='text-align: center; padding-bottom: 10px;'><h3>👤 {username}</h3><p style='font-size:0.8rem; color:gray; margin-top:-15px;'>{role.capitalize()} • Online</p></div>", unsafe_allow_html=True)
-    nav_link("⚙️ Manage Profile", "👤 Manage Profile", query_page)
+    with st.sidebar.container(border=True):
+        st.markdown(f"<h3 style='margin-bottom: 0px;'>👤 {username}</h3>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size:0.85rem; color:gray; padding-bottom: 10px;'>🟢 Logged in ({role.capitalize()})</p>", unsafe_allow_html=True)
+        if st.sidebar.button("⚙️ Manage Profile", use_container_width=True, key="btn_side_profile"):
+            st.query_params["page"] = "👤 Manage Profile"
+            st.rerun()
+
+    st.sidebar.markdown("### 📌 Navigation")
+    pages = ["🏠 Home", "☁️ Document Ingestion", "📊 Reports"]
+    
+    # Find current page index for radio
+    current_nav_page = query_page if query_page in pages else "🏠 Home"
+    page_index = pages.index(current_nav_page)
+    
+    selected_page = st.sidebar.radio("Navigate to:", pages, index=page_index, label_visibility="collapsed")
+    
+    # Simple navigation logic
+    if st.query_params.get("page") != selected_page and query_page != "👤 Manage Profile":
+        st.query_params["page"] = selected_page
+        st.rerun()
+    elif query_page == "👤 Manage Profile" and selected_page != pages[pages.index(current_nav_page)]:
+         # If coming back from profile page
+         st.query_params["page"] = selected_page
+         st.rerun()
+
+    # Reduced spacer to bring logout closer to navigation
+    st.sidebar.markdown("<div style='height: 5vh;'></div>", unsafe_allow_html=True)
     st.sidebar.divider()
-
-    # Collapsible Navigate Section
-    with st.sidebar.expander("📌 Navigate", expanded=(query_page in ["🏠 Home", "📄 Upload Feedback", "📊 Upload Churn Data"])):
-        nav_link("🏠 Home", "🏠 Home", query_page)
-        nav_link("📄 Feedbacks", "📄 Upload Feedback", query_page)
-        nav_link("📊 Churn", "📊 Upload Churn Data", query_page)
-
-    # Collapsible Analytics Section
-    with st.sidebar.expander("📊 Analytics", expanded=(query_page in ["💬 Sentiment Dashboard", "📉 Churn Insights", "🔑 Keyword Analysis", "📈 Trends (NEW)"])):
-        nav_link("💬 Sentiment", "💬 Sentiment Dashboard", query_page)
-        nav_link("📉 Churn", "📉 Churn Insights", query_page)
-        nav_link("🔑 Keywords", "🔑 Keyword Analysis", query_page)
-        nav_link("📈 Trends", "📈 Trends (NEW)", query_page)
-
-    # Collapsible Management Section
-    with st.sidebar.expander("📂 Management", expanded=(query_page in ["📁 Upload History (NEW)", "📋 My Reports"])):
-        nav_link("📁 History", "📁 Upload History (NEW)", query_page)
-        nav_link("📋 Reports", "📋 My Reports", query_page)
-
-    # Collapsible System Options (Admin Only)
-    if role == "admin":
-        with st.sidebar.expander("👑 Admin Control", expanded=(query_page in ["👑 Admin Panel", "👥 Manage Users"])):
-            nav_link("👑 Panel", "👑 Admin Panel", query_page)
-            nav_link("👥 Users", "👥 Manage Users", query_page)
-
-    # Settings at Bottom
-    st.sidebar.markdown("<div style='height: 10vh;'></div>", unsafe_allow_html=True)
-    st.sidebar.divider()
-    dark_mode = st.sidebar.toggle("🌙 Dark Mode")
-    if dark_mode: st.session_state.theme = "dark"
-    else: st.session_state.theme = "light"
     
     if st.sidebar.button("🚪 Logout", type="primary", use_container_width=True):
         st.session_state.logged_in = False
