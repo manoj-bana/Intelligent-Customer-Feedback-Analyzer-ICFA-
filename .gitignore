@@ -25,6 +25,7 @@ wheels/
 venv/
 ENV/
 .vscode/
+.env
 
 # Database
 icfa.db
