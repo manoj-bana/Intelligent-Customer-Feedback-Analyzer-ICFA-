@@ -70,7 +70,19 @@ def reset_user_password(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        new_password = "ResetPassword123!"
+        # Generate a secure random temporary password
+        import secrets
+        import string
+        alphabet = string.ascii_letters + string.digits
+        # 10 random chars + guaranteed uppercase + digit + special char
+        base = ''.join(secrets.choice(alphabet) for _ in range(9))
+        new_password = (
+            secrets.choice(string.ascii_uppercase)
+            + base
+            + secrets.choice(string.digits)
+            + secrets.choice("@$!%*?&")
+        )
+        
         user.password = hash_password(new_password)
         
         # Clear any existing reset tokens
@@ -78,9 +90,10 @@ def reset_user_password(
         user.reset_token_expiry = None
         
         db.commit()
-        return {"message": "Password overridden", "new_password": new_password}
+        return {"message": "Password has been reset", "new_password": new_password}
     finally:
         db.close()
+
 
 
 @router.delete("/users/{user_id}")
