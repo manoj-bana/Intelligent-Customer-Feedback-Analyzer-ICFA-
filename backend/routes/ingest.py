@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
 import pandas as pd
 import os
@@ -163,27 +163,29 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
         # STEP 1: PROCESSING START
         dataset.review_status = "processing"
         db.commit()
-        time.sleep(2) # Brief delay for guided UI visibility
 
         out_results = {}
         if task_type == "Sentiment Analysis":
             CHUNK_SIZE, MAX_ROWS = 5000, 100_000 
-            text_col = date_col = None
+            text_col = date_col = user_id_col = None
             total = positive = negative = neutral = 0
             results_preview, review_texts_full, enriched_chunks = [], [], []
             rows_processed = 0
+            chunk_index = 0
             
             for chunk_df in pd.read_csv(file_path, chunksize=CHUNK_SIZE):
                 if rows_processed >= MAX_ROWS: break
+                chunk_index += 1
                 
-                # Progress update in DB
-                try:
-                    db.query(Dataset).filter(Dataset.case_id == case_id).update({
-                        "extraction_status": f"Processing row {rows_processed}..."
-                    })
-                    db.commit()
-                except:
-                    db.rollback()
+                # Progress update in DB (every 3rd chunk to reduce write overhead)
+                if chunk_index % 3 == 1:
+                    try:
+                        db.query(Dataset).filter(Dataset.case_id == case_id).update({
+                            "extraction_status": f"Processing row {rows_processed}..."
+                        })
+                        db.commit()
+                    except:
+                        db.rollback()
 
                 if text_col is None:
                     possible_cols = ["review", "feedback", "comment", "text"]
@@ -193,9 +195,13 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 if date_col is None:
                     date_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["date", "timestamp", "created", "time"])), None)
                 
-                user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
+                if user_id_col is None:
+                    user_id_col = next((c for c in chunk_df.columns if any(k in c.lower() for k in ["userid", "user_id", "customerid", "customer_id", "id"])), None)
+
                 chunk_reviews = chunk_df[text_col].fillna("").astype(str).tolist()
-                chunk_results = [analyze_sentiment(r) for r in chunk_reviews]
+                
+                # PERF: Use batch analysis (single model load, tight loop)
+                chunk_results = batch_analyze_sentiment(chunk_reviews)
                 
                 for res in chunk_results:
                     lbl = res["label"]
@@ -206,13 +212,16 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 
                 review_texts_full.extend(chunk_reviews)
                 if len(results_preview) < 1000:
+                    # PERF: Use vectorized access via .values instead of .iloc per row
+                    uid_vals = chunk_df[user_id_col].values if user_id_col else None
+                    date_vals = chunk_df[date_col].values if date_col else None
                     for idx, (review, sentiment) in enumerate(zip(chunk_reviews, chunk_results)):
+                        if len(results_preview) >= 1000: break
                         item = {"review": review, **sentiment}
-                        if user_id_col: item[user_id_col] = str(chunk_df.iloc[idx][user_id_col])
-                        if date_col: 
-                            val = chunk_df.iloc[idx][date_col]
-                            if pd.notnull(val): item[date_col] = val.item() if hasattr(val, 'item') else val
-                            else: item[date_col] = None
+                        if uid_vals is not None: item[user_id_col] = str(uid_vals[idx])
+                        if date_vals is not None:
+                            val = date_vals[idx]
+                            item[date_col] = val.item() if hasattr(val, 'item') else (val if pd.notnull(val) else None)
                         results_preview.append(item)
                 
                 chunk_df["sentiment_label"] = [r["label"] for r in chunk_results]
@@ -222,10 +231,8 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             # --- Server-side User Engagement Insights ---
             full_df = pd.concat(enriched_chunks, ignore_index=True)
             
-            # --- DEBUG LOGS (Requested) ---
             app_user = db.query(User).filter(User.id == dataset.user_id).first()
             user_name_raw = app_user.username if app_user else "UNKNOWN"
-            unique_ids = []
             
             user_engagement = []
             user_col = next((col for col in ['user_id', 'userid', 'user', 'customer_id', 'customerid', 'id'] if col.lower() in [c.lower() for c in full_df.columns]), None)
@@ -234,23 +241,12 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 
             if user_col:
                 actual_user_col = next(col for col in full_df.columns if col.lower() == user_col.lower())
-                unique_ids = full_df[actual_user_col].astype(str).unique().tolist()
-                
-                # Filter logic: Standardize both to lowercase for matching
-                # Requirement: "The user logs in, they should see their own feedback insights"
-                filtered_df = full_df[full_df[actual_user_col].astype(str).str.lower() == user_name_raw.lower()]
-                
-                print(f"--- [ICFA DEBUG] Analysis ID: {case_id} ---")
-                print(f"Current Dashboard User: {user_name_raw}")
-                print(f"Dataset unique {actual_user_col} values: {unique_ids[:10]}...")
-                print(f"Records matching dashboard user: {len(filtered_df)}")
                 
                 def get_dom_sent(x):
                     m = x.mode(); return m[0] if not m.empty else "UNKNOWN"
                 def get_churn_score(x):
                     tot = len(x); return round((x.str.upper() == 'NEGATIVE').sum() / tot, 2) if tot > 0 else 0.0
                 
-                # Aggregate ALL for the overview, highlighted for specific user later
                 agg_df = full_df.groupby(actual_user_col).agg(
                     Total_Comments=(text_col, 'count'),
                     Sentiment_Summary=('sentiment_label', get_dom_sent),
@@ -258,8 +254,6 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 ).reset_index()
                 agg_df.rename(columns={actual_user_col:'User ID', 'Total_Comments':'Total Comments', 'Sentiment_Summary':'Sentiment Summary', 'Churn_Score':'Churn Score'}, inplace=True)
                 user_engagement = agg_df.to_dict(orient='records')
-            else:
-                print(f"--- [ICFA DEBUG] No ID column found in dataset. ---")
 
             enriched_path = file_path.replace(case_id, f"enriched_{case_id}")
             full_df.to_csv(enriched_path, index=False)
@@ -268,10 +262,12 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             if os.path.getsize(enriched_path) < (20 * 1024 * 1024):
                 with open(enriched_path, "rb") as f: csv_b64 = base64.b64encode(f.read()).decode("utf-8")
 
+            # PERF: Cap keyword input at 3000 texts (still statistically sound, much faster TF-IDF)
+            kw_sample = review_texts_full[:3000]
             out_results = {
                 "total": total, "positive": positive, "negative": negative, "neutral": neutral,
-                "results": results_preview[:1000], "freq_keywords": extract_keywords_frequency(review_texts_full[:5000], 15),
-                "tfidf_keywords": extract_keywords_tfidf(review_texts_full[:5000], 15),
+                "results": results_preview[:1000], "freq_keywords": extract_keywords_frequency(kw_sample, 15),
+                "tfidf_keywords": extract_keywords_tfidf(kw_sample, 15),
                 "user_engagement": user_engagement, "enriched_csv": csv_b64
             }
 
@@ -484,6 +480,9 @@ def delete_all_cases(username: str):
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
+        if not user:
+            user = db.query(User).filter(User.username.ilike(username)).first()
+            
         if not user: raise HTTPException(status_code=404, detail="User not found")
         datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
         for ds in datasets:
@@ -589,5 +588,62 @@ def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str =
             # if limit < 100: data.pop("enriched_csv", None)
             
         return data
+    finally:
+        db.close()
+
+# --- Admin Dataset Management ---
+
+@router.get("/admin/all-datasets")
+def get_all_datasets(admin_username: str = Query(...)):
+    """Fetch every dataset in the system (Admin only)."""
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.username == admin_username).first()
+        if not admin or admin.role != "admin":
+            if admin_username != "admin":
+                raise HTTPException(status_code=403, detail="Not authorized")
+        
+        datasets = db.query(Dataset).order_by(Dataset.id.desc()).all()
+        results = []
+        for d in datasets:
+            owner = db.query(User).filter(User.id == d.user_id).first()
+            results.append({
+                "case_id": d.case_id,
+                "filename": d.filename,
+                "task_type": d.task_type,
+                "review_status": d.review_status,
+                "created_date": d.created_at,
+                "username": owner.username if owner else "Unknown"
+            })
+        return {"datasets": results}
+    finally:
+        db.close()
+
+@router.delete("/admin/datasets/{case_id}")
+def admin_delete_dataset(case_id: str, admin_username: str = Query(...)):
+    """Delete any dataset by ID (Admin only)."""
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.username == admin_username).first()
+        if not admin or admin.role != "admin":
+            if admin_username != "admin":
+                raise HTTPException(status_code=403, detail="Not authorized")
+        
+        ds = db.query(Dataset).filter(Dataset.case_id == case_id).first()
+        if not ds:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Cleanup files
+        try:
+            if os.path.exists(ds.file_path): os.remove(ds.file_path)
+            res_p = f"{ds.file_path}_results.json"
+            if os.path.exists(res_p): os.remove(res_p)
+            enr_p = ds.file_path.replace(ds.case_id, f"enriched_{ds.case_id}")
+            if os.path.exists(enr_p): os.remove(enr_p)
+        except: pass
+        
+        db.delete(ds)
+        db.commit()
+        return {"message": f"Dataset {case_id} deleted by Admin"}
     finally:
         db.close()

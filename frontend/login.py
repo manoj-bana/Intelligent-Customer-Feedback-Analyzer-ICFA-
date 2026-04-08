@@ -3,7 +3,14 @@ import requests
 import re
 from frontend.errors import ERROR_MESSAGES
 
-API_URL = "http://127.0.0.1:8000"
+import os
+from dotenv import load_dotenv
+
+# Robust .env loading - look for it in the project root relative to this file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(env_path)
+
+API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 def show():
     """
@@ -88,10 +95,12 @@ def render_login_form():
                     st.session_state.logged_in = True
                     st.session_state.username = data["username"]
                     st.session_state.token = data["access_token"]
+                    st.session_state.role = data.get("role", "user")
                     
                     # Store in query params for browser refresh persistence
                     st.query_params["token"] = data["access_token"]
                     st.query_params["username"] = data["username"]
+                    st.query_params["role"] = data.get("role", "user")
                     
                     st.success("✅ Login successful!")
                     st.rerun()
