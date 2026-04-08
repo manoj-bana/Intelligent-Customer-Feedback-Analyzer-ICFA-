@@ -2,6 +2,9 @@ import sys
 import os
 import streamlit as st
 
+# Bypass local system proxies for connection to the backend
+os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+
 # Ensure project root is in sys.path for backend/frontend imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
