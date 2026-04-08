@@ -3,7 +3,14 @@ import requests
 import re
 from frontend.errors import ERROR_MESSAGES
 
-API_URL = "http://127.0.0.1:8000"
+import os
+from dotenv import load_dotenv
+
+# Robust .env loading - look for it in the project root relative to this file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(env_path)
+
+API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 def show():
     """
@@ -49,10 +56,12 @@ def show():
     
     # Connection Status Check using /health endpoint
     try:
-        requests.get(f"{API_URL}/health", timeout=1)
+        # Increased timeout to 3 seconds and bypass local proxies
+        requests.get(f"{API_URL}/health", timeout=3, proxies={"http": None, "https": None})
         status = '🟢 System Online'
-    except Exception:
-        status = '🔴 System Offline'
+    except Exception as e:
+        # Output exception for debugging if still offline
+        status = f'🔴 System Offline ({type(e).__name__})'
     
     st.sidebar.markdown(f"**Status:** {status}")
 
@@ -196,6 +205,13 @@ def render_password_reset_flow():
                 )
 
         confirm_pass = st.text_input("Confirm New Password", type="password", key="reset_pass2")
+        
+        # Match Indicator
+        if confirm_pass:
+            if new_pass == confirm_pass:
+                st.markdown('<p class="inline-msg check-valid">✓ Passwords match</p>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<p class="inline-msg check-invalid">⚠ {ERROR_MESSAGES["PASSWORD_MISMATCH"]}</p>', unsafe_allow_html=True)
         
         if st.button("Update Password", type="primary", width='stretch'):
             if not all(r[0] for r in rules):

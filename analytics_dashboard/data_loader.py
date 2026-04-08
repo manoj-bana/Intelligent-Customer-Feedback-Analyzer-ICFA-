@@ -25,17 +25,30 @@ def load_data(uploaded_file):
         st.error(f"Invalid file format or error reading CSV: {e}")
         return None, None
 
-@st.cache_data
 def aggregate_user_data(df):
-    user_col = next((col for col in ['user_id', 'userid', 'user'] if col.lower() in [c.lower() for c in df.columns]), None)
+    """Aggregates per-user sentiment stats. Works with any column naming."""
+    # Step 1: Find the user/customer ID column
+    user_col = next((col for col in ['user_id', 'userid', 'user', 'customer_id', 'customerid', 'id'] if col.lower() in [c.lower() for c in df.columns]), None)
     if not user_col:
+        user_col = next((c for c in df.columns if 'id' in c.lower()), None)
+    
+    if not user_col:
+        print("[DEBUG] aggregate_user_data: No user ID column found")
         return None
         
     actual_user_col = next(col for col in df.columns if col.lower() == user_col.lower())
     
     if 'sentiment_label' not in df.columns:
-        st.error("No sentiment data found. Please run preprocessing first.")
+        print("[DEBUG] aggregate_user_data: No sentiment_label column")
         return None
+    
+    # Step 2: Find the text column dynamically (handles 'Text', 'feedback_text', 'review', etc.)
+    text_col = next((c for c in df.columns if c.lower() in ['feedback_text', 'review', 'text', 'feedback', 'comment']), None)
+    if not text_col:
+        # Fallback: use sentiment_label for counting
+        text_col = 'sentiment_label'
+    
+    print(f"[DEBUG] aggregate_user_data: user_col={actual_user_col}, text_col={text_col}")
         
     def get_dominant_sentiment(x):
         return x.mode()[0] if not x.mode().empty else "UNKNOWN"
@@ -48,7 +61,7 @@ def aggregate_user_data(df):
         return round(negative_count / total, 2)
         
     agg_df = df.groupby(actual_user_col).agg(
-        Total_Comments=('feedback_text', 'count'),
+        Total_Comments=(text_col, 'count'),
         Sentiment_Summary=('sentiment_label', get_dominant_sentiment),
         Churn_Score=('sentiment_label', calc_churn_score)
     ).reset_index()
@@ -59,4 +72,6 @@ def aggregate_user_data(df):
         'Sentiment_Summary': 'Sentiment Summary', 
         'Churn_Score': 'Churn Score'
     }, inplace=True)
+    
+    print(f"[DEBUG] aggregate_user_data: SUCCESS - {len(agg_df)} users aggregated")
     return agg_df
