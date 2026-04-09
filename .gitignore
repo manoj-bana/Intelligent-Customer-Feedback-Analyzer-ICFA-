@@ -26,6 +26,7 @@ venv/
 ENV/
 .vscode/
 .env
+.env.*
 
 # Database
 icfa.db
