@@ -340,7 +340,9 @@ def render_visualizations(data, df_to_plot):
     chart_opts = [
         "All Visualizations (Grid)", 
         "Sentiment Distribution (Bar)", 
-        "Sentiment Share (Pie)"
+        "Sentiment Share (Pie)",
+        "Sentiment Over Time (Trends)",
+        "Top Keywords (Chart)"
     ]
     selected_chart = st.selectbox("Select Chart View", chart_opts, key="viz_selector")
     
@@ -348,13 +350,22 @@ def render_visualizations(data, df_to_plot):
         c1, c2 = st.columns(2)
         with c1:
             generate_sentiment_bar_chart(df_plot)
+            generate_sentiment_line_chart(df_to_plot)
         with c2:
             generate_sentiment_pie_chart(df_plot)
+            # Transform keyword data for chart
+            freq_data = [(k["word"], k["count"]) for k in data.get("freq_keywords", [])]
+            generate_keyword_frequency_chart(freq_data)
                 
     elif selected_chart == "Sentiment Distribution (Bar)":
         generate_sentiment_bar_chart(df_plot)
     elif selected_chart == "Sentiment Share (Pie)":
         generate_sentiment_pie_chart(df_plot)
+    elif selected_chart == "Sentiment Over Time (Trends)":
+        generate_sentiment_line_chart(df_to_plot)
+    elif selected_chart == "Top Keywords (Chart)":
+        freq_data = [(k["word"], k["count"]) for k in data.get("freq_keywords", [])]
+        generate_keyword_frequency_chart(freq_data)
 
 def render_user_aggregation_backend(user_engagement):
     """
