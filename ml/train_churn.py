@@ -98,4 +98,4 @@ def train():
     print(f"\nModel successfully saved to {MODEL_PATH}")
 
 if __name__ == "__main__":
-    train()
+    train()
