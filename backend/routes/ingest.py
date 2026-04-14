@@ -203,12 +203,12 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 # PERF: Use batch analysis (single model load, tight loop)
                 chunk_results = batch_analyze_sentiment(chunk_reviews)
                 
-                for res in chunk_results:
-                    lbl = res["label"]
-                    total += 1
-                    if lbl == "POSITIVE": positive += 1
-                    elif lbl == "NEGATIVE": negative += 1
-                    else: neutral += 1
+                # Fast aggregation using vectorized labels
+                labels = [r["label"] for r in chunk_results]
+                total += len(labels)
+                positive += labels.count("POSITIVE")
+                negative += labels.count("NEGATIVE")
+                neutral += labels.count("NEUTRAL")
                 
                 review_texts_full.extend(chunk_reviews)
                 if len(results_preview) < 1000:
@@ -242,17 +242,22 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             if user_col:
                 actual_user_col = next(col for col in full_df.columns if col.lower() == user_col.lower())
                 
-                def get_dom_sent(x):
-                    m = x.mode(); return m[0] if not m.empty else "UNKNOWN"
-                def get_churn_score(x):
-                    tot = len(x); return round((x.str.upper() == 'NEGATIVE').sum() / tot, 2) if tot > 0 else 0.0
+                # Fast Vectorized column for Churn Score calculation
+                full_df['_is_neg'] = (full_df['sentiment_label'] == 'NEGATIVE').astype(int)
                 
                 agg_df = full_df.groupby(actual_user_col).agg(
                     Total_Comments=(text_col, 'count'),
-                    Sentiment_Summary=('sentiment_label', get_dom_sent),
-                    Churn_Score=('sentiment_label', get_churn_score)
-                ).reset_index()
+                    Churn_Score=('_is_neg', 'mean')
+                ).round({'Churn_Score': 2})
+                
+                # Fast Mode Calculation (No python looping)
+                sent_mode = full_df.groupby([actual_user_col, 'sentiment_label']).size().reset_index(name='count')
+                sent_mode = sent_mode.sort_values(by=[actual_user_col, 'count'], ascending=[True, False]).drop_duplicates(actual_user_col)
+                sent_mode = sent_mode.set_index(actual_user_col)['sentiment_label']
+                
+                agg_df = agg_df.join(sent_mode.rename('Sentiment_Summary')).reset_index()
                 agg_df.rename(columns={actual_user_col:'User ID', 'Total_Comments':'Total Comments', 'Sentiment_Summary':'Sentiment Summary', 'Churn_Score':'Churn Score'}, inplace=True)
+                
                 user_engagement = agg_df.to_dict(orient='records')
 
             enriched_path = file_path.replace(case_id, f"enriched_{case_id}")

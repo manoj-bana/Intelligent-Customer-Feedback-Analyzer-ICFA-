@@ -3,8 +3,9 @@ import sqlite3
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# Import Base from models to ensure all models are registered for create_all()
-from backend.database.models import Base
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
 
 # Configuration: Default to local SQLite if no environment variable is provided
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,8 +34,8 @@ def get_db():
     finally:
         db.close()
 
-# Ensure tables exist at startup
-Base.metadata.create_all(bind=engine)
+# Note: We now call create_all in main.py to ensure all models are registered first.
+# Base.metadata.create_all(bind=engine)
 
 # --- Auto-migration: add missing columns to existing tables ---
 # SQLAlchemy's create_all() does NOT alter existing tables.
@@ -47,25 +48,41 @@ def _run_migrations():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # Get current columns in users table
+        # 1. Users table migrations
         cursor.execute("PRAGMA table_info(users)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-
-        migrations = [
+        user_cols = {row[1] for row in cursor.fetchall()}
+        
+        user_migrations = [
             ("is_active", "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"),
             ("role",      "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'"),
+            ("org_id",    "ALTER TABLE users ADD COLUMN org_id INTEGER"),
         ]
-        for col_name, sql in migrations:
-            if col_name not in existing_cols:
+        for col, sql in user_migrations:
+            if col not in user_cols:
                 cursor.execute(sql)
-                print(f"[DB] Migration: added '{col_name}' column to users table.")
+                print(f"[DB] Migration: added '{col}' to users.")
 
-        # Ensure no users are accidentally locked out (NULL is_active)
+        # 2. Datasets table migrations
+        cursor.execute("PRAGMA table_info(datasets)")
+        ds_cols = {row[1] for row in cursor.fetchall()}
+        
+        ds_migrations = [
+            ("org_id",        "ALTER TABLE datasets ADD COLUMN org_id INTEGER"),
+            ("result_data",   "ALTER TABLE datasets ADD COLUMN result_data TEXT"),
+            ("error_message", "ALTER TABLE datasets ADD COLUMN error_message TEXT"),
+            ("last_analyzed", "ALTER TABLE datasets ADD COLUMN last_analyzed TEXT"),
+        ]
+        for col, sql in ds_migrations:
+            if col not in ds_cols:
+                cursor.execute(sql)
+                print(f"[DB] Migration: added '{col}' to datasets.")
+
+        # Ensure no users are locked out
         cursor.execute("UPDATE users SET is_active = 1 WHERE is_active IS NULL")
 
         conn.commit()
         conn.close()
-        print("[DB] Migration check complete.")
+        print("[DB] Multi-tenant migration check complete.")
     except Exception as e:
         print(f"[DB] Migration warning: {e}")
 

@@ -26,6 +26,16 @@ def get_notifications(username):
     except: pass
     return []
 
+def nav_link(label, target, current_page):
+    """
+    Helper to render sidebar navigation buttons with active-state styling.
+    """
+    # Use 'primary' type for the currently active page to highlight it
+    is_active = (current_page == target)
+    if st.sidebar.button(label, use_container_width=True, type="primary" if is_active else "secondary"):
+        st.query_params["page"] = target
+        st.rerun()
+
 def inject_premium_css():
     """Injects high-end enterprise styling for glassmorphism and extreme layout density."""
     st.markdown("""
@@ -89,19 +99,6 @@ def show():
     query_page = st.query_params.get("page", "🏠 Home")
     role = st.session_state.get("role", "user")
 
-    # --- Sidebar UI Navigation Hub ---
-    def nav_link(label, page_name, current_page, is_indented=False):
-        is_active = (current_page == page_name)
-        prefix = "&nbsp;&nbsp;" if is_indented else ""
-        btn_label = f"{prefix}{label}"
-        
-        # Use a more compact styling for links
-        cols = st.sidebar.columns([12, 1])
-        with cols[0]:
-            if st.button(btn_label, use_container_width=True, type="primary" if is_active else "secondary", key=f"nav_{page_name}"):
-                st.query_params["page"] = page_name
-                st.rerun()
-
     # --- Sidebar UI ---
     st.sidebar.markdown(f"<div style='text-align: center; padding-bottom: 10px;'><h3>👤 {username}</h3><p style='font-size:0.8rem; color:gray; margin-top:-15px;'>{role.capitalize()} • Online</p></div>", unsafe_allow_html=True)
     nav_link("⚙️ Manage Profile", "👤 Manage Profile", query_page)
@@ -131,12 +128,9 @@ def show():
             nav_link("👑 Panel", "👑 Admin Panel", query_page)
             nav_link("👥 Users", "👥 Manage Users", query_page)
 
-    # Settings at Bottom
-    st.sidebar.markdown("<div style='height: 10vh;'></div>", unsafe_allow_html=True)
+    # Reduced spacer to bring logout closer to navigation
+    st.sidebar.markdown("<div style='height: 5vh;'></div>", unsafe_allow_html=True)
     st.sidebar.divider()
-    dark_mode = st.sidebar.toggle("🌙 Dark Mode")
-    if dark_mode: st.session_state.theme = "dark"
-    else: st.session_state.theme = "light"
     
     if st.sidebar.button("🚪 Logout", type="primary", use_container_width=True):
         st.session_state.logged_in = False
