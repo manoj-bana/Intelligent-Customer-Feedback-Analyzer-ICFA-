@@ -16,7 +16,6 @@ from frontend.pages import dashboard
 # --- Page Configuration ---
 st.set_page_config(
     page_title="ICFA", 
-    page_icon="📊", 
     layout="wide"
 )
 
