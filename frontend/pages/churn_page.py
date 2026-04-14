@@ -3,33 +3,28 @@ import streamlit as st
 import pandas as pd
 from frontend.utils.export_utils import export_to_format
 
-API_URL = "http://127.0.0.1:8000"
+import os
+from dotenv import load_dotenv
 
-@st.cache_data
-def get_processed_churn_results(predictions_data):
-    """Caches churn prediction results and pre-calculates lowercase search index."""
-    df = pd.DataFrame(predictions_data)
-    # Identify searchable ID column
-    id_cols = [c for c in df.columns if any(k in c.lower() for k in ["customerid", "customer_id", "userid", "user_id", "id"])]
-    if id_cols:
-        df['_search_id'] = df[id_cols[0]].astype(str).str.lower()
-    return df
+load_dotenv()
+API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
-from streamlit_autorefresh import st_autorefresh
-
-API_URL = "http://127.0.0.1:8000"
+def get_headers():
+    token = st.session_state.get("token")
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 def fetch_churn_data(case_id, page=1, limit=10, search=""):
     try:
         res = requests.get(
             f"{API_URL}/ingest/results/{case_id}",
             params={"page": page, "limit": limit, "search": search},
+            headers=get_headers(),
             timeout=10
         )
         if res.status_code == 200:
             return res.json()
-    except Exception as e:
-        print(f"Error fetching data: {e}")
+    except Exception:
+        pass
     return None
 
 def show():
@@ -51,7 +46,7 @@ def show():
 
     # Fetch user's cases safely (Fresh every heartbeat)
     try:
-        res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
+        res = requests.get(f"{API_URL}/ingest/cases/{username}", headers=get_headers(), timeout=10)
         cases_data = res.json().get("cases", []) if res.status_code == 200 else []
     except Exception:
         cases_data = []

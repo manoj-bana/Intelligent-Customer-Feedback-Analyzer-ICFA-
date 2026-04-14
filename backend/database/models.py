@@ -1,8 +1,29 @@
 import datetime
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy.orm import relationship
+from backend.database.db import Base
+from backend.models.config import CompanyConfig
 
-Base = declarative_base()
+class Organization(Base):
+    """
+    Represents a tenant company (e.g., FinCorp, MedCare).
+    Controls access silos and custom ML configurations.
+    """
+    __tablename__ = "organizations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True)
+    slug = Column(String, unique=True, index=True) # e.g., 'fincorp'
+    plan_tier = Column(String, default="free") # free, pro, enterprise
+    created_at = Column(
+        String, 
+        default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    )
+    
+    # Relationships
+    users = relationship("User", back_populates="organization")
+    datasets = relationship("Dataset", back_populates="organization")
+    config = relationship("CompanyConfig", back_populates="organization", uselist=False)
 
 class User(Base):
     """
@@ -20,6 +41,10 @@ class User(Base):
     security_answer_hash = Column(String, nullable=True)
     reset_token = Column(String, nullable=True)
     reset_token_expiry = Column(String, nullable=True)
+    
+    # Multi-tenancy
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    organization = relationship("Organization", back_populates="users")
 
 class AdminRequest(Base):
     """
@@ -58,6 +83,14 @@ class Dataset(Base):
         default=lambda: datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     )
     notification_seen = Column(Integer, default=0)
+    
+    # Multi-tenancy
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    organization = relationship("Organization", back_populates="datasets")
+
+    result_data = Column(String, nullable=True) # JSON serialized results
+    error_message = Column(String, nullable=True) # Traceback for failed jobs
+    last_analyzed = Column(String, nullable=True) # Timestamp of last processing
 
 class Feedback(Base):
     """

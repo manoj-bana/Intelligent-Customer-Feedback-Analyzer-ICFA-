@@ -174,7 +174,7 @@ pip install -r requirements.txt
 ### **3. Database Migration**
 If starting with a fresh environment, initialize the database columns:
 ```bash
-python migrate_hashes.py
+python tools/migrate_hashes.py
 ```
 
 ### **4. Running the Services**

@@ -58,7 +58,7 @@ pip install -r requirements.txt
 ### 3. Database Initialization
 Ensure the database schema and security features are ready:
 ```bash
-python migrate_hashes.py
+python tools/migrate_hashes.py
 ```
 
 ---

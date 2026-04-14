@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from jose import jwt
 import datetime
@@ -6,7 +7,7 @@ import re
 import secrets
 import bcrypt
 from backend.database.db import SessionLocal
-from backend.database.models import User, AdminRequest, Notification
+from backend.database.models import User, AdminRequest, Notification, Organization
 
 import os
 from dotenv import load_dotenv
@@ -18,6 +19,48 @@ load_dotenv(env_path)
 router = APIRouter()
 SECRET_KEY = os.getenv("SECRET_KEY", "icfa_secret_key")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Dependency to get the current authenticated user from JWT."""
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except Exception:
+        raise credentials_exception
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if user is None:
+            raise credentials_exception
+        if user.is_active == 0:
+            raise HTTPException(status_code=403, detail="Account deactivated")
+        return user
+    finally:
+        db.close()
+
+def get_current_org(current_user: User = Depends(get_current_user)):
+    """Dependency to get the organization associated with the current user."""
+    if not current_user.org_id:
+        raise HTTPException(status_code=403, detail="User is not associated with any organization")
+    
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter(Organization.id == current_user.org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return org
+    finally:
+        db.close()
 
 def hash_password(password: str) -> str:
     """Securely hash a password using bcrypt."""
@@ -103,24 +146,8 @@ def check_email(email: str = Query(...)):
 @router.post("/login")
 def login(data: LoginRequest):
     """Authenticate a user and return an access token."""
-    print(f"[AUTH] Login attempt for: {data.username}")
     
-    # 1. PRIORITY: Admin bypass for system recovery
-    if data.username.lower() == "admin" and data.password == "admin123":
-        print("[AUTH] Admin bypass triggered.")
-        expiration = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
-        try:
-            token = jwt.encode(
-                {"sub": "admin", "role": "admin", "exp": expiration},
-                SECRET_KEY,
-                algorithm=ALGORITHM
-            )
-            return {"access_token": token, "username": "admin", "role": "admin"}
-        except Exception as e:
-            print(f"[AUTH] Token Error: {e}")
-            raise HTTPException(status_code=500, detail=f"Token error: {e}")
-
-    # 2. Database check
+    # 1. Database check
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == data.username).first()
@@ -129,30 +156,31 @@ def login(data: LoginRequest):
             user = db.query(User).filter(User.username.ilike(data.username)).first()
             
         if user:
-            print(f"[AUTH] User found in DB. Verifying password for {user.username}...")
             if verify_password(data.password, user.password):
                 if user.is_active == 0:
-                    print(f"[AUTH] Warning: User {user.username} is deactivated.")
                     raise HTTPException(status_code=403, detail="Account deactivated. Please contact support.")
                 
                 # Auto-upgrade legacy plain-text password
                 if not user.password.startswith('$2b$'):
-                    print(f"[AUTH] Upgrading password for {user.username} to bcrypt.")
                     user.password = hash_password(data.password)
                     db.commit()
 
                 expiration = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
                 token = jwt.encode(
-                    {"sub": user.username, "role": user.role, "exp": expiration},
+                    {
+                        "sub": user.username, 
+                        "role": user.role, 
+                        "org_id": user.org_id,
+                        "exp": expiration
+                    },
                     SECRET_KEY,
                     algorithm=ALGORITHM
                 )
-                print(f"[AUTH] Success: {user.username} logged in.")
-                return {"access_token": token, "username": user.username, "role": user.role}
+                return {"access_token": token, "username": user.username, "role": user.role, "org_id": user.org_id}
             else:
-                print(f"[AUTH] Failed: Password mismatch for {user.username}.")
+                pass
         else:
-            print(f"[AUTH] Failed: User {data.username} not found.")
+            pass
 
         raise HTTPException(status_code=401, detail="Invalid credentials")
     finally:
@@ -161,10 +189,19 @@ def login(data: LoginRequest):
 @router.post("/register")
 def register(data: RegisterRequest):
     """Register a new user with secure hashing."""
+    # Check if registration is allowed
+    allow_reg = os.getenv("ALLOW_REGISTRATION", "True").lower() == "true"
+    if not allow_reg:
+        raise HTTPException(status_code=403, detail="Self-registration is currently disabled.")
+
     if not re.match(r"[^@]+@[^@]+\.[^@]+", data.email):
         raise HTTPException(status_code=400, detail="Invalid email format")
     if len(data.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be 8+ chars")
+    
+    # Security Rule: Prevent hijacking of the admin handle
+    if data.username.lower().strip() == "admin":
+        raise HTTPException(status_code=400, detail="Username 'admin' is reserved for system use.")
 
     db = SessionLocal()
     try:
@@ -329,9 +366,7 @@ def get_admin_requests(admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            # For testing/demo fallback: allow if username is 'admin'
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         requests = db.query(AdminRequest).all()
         return {"requests": [
@@ -353,8 +388,7 @@ def approve_admin_request(request_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         req = db.query(AdminRequest).filter(AdminRequest.id == request_id).first()
         if not req:
@@ -378,8 +412,7 @@ def reject_admin_request(request_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         req = db.query(AdminRequest).filter(AdminRequest.id == request_id).first()
         if not req:
@@ -402,8 +435,7 @@ def get_all_users(admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         users = db.query(User).all()
         return {"users": [
@@ -425,8 +457,7 @@ def delete_user(user_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -448,8 +479,7 @@ def reactivate_user(user_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -469,8 +499,7 @@ def demote_user(user_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         user = db.query(User).filter(User.id == user_id).first()
         if not user:

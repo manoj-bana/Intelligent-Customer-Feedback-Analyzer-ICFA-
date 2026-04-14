@@ -76,7 +76,7 @@ def preprocess(df: pd.DataFrame, model=None) -> pd.DataFrame:
     if "TotalCharges" in df.columns:
         df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
         
-    cat_cols = [c for c in ["Contract", "PaymentMethod", "InternetService"] if c in df.columns]
+    cat_cols = [c for c in df.select_dtypes(include=['object', 'string']).columns if c in df.columns]
     if cat_cols:
         df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
         
@@ -91,11 +91,15 @@ def preprocess(df: pd.DataFrame, model=None) -> pd.DataFrame:
         
     return df
 
-def predict_churn(df: pd.DataFrame) -> dict:
+def predict_churn(df: pd.DataFrame, config=None) -> dict:
     """
     Predicts customer churn probability for a given DataFrame.
-    Returns a dictionary with summary statistics and individual predictions.
+    Supports organization-specific risk thresholds.
     """
+    # 1. Load config values
+    high_thresh = config.high_risk_threshold if config and hasattr(config, "high_risk_threshold") else 0.70
+    med_thresh = config.medium_risk_threshold if config and hasattr(config, "medium_risk_threshold") else 0.40
+
     model = load_churn_model()
     if model is None:
         return {"error": "Model file not found or could not be loaded."}
@@ -120,13 +124,18 @@ def predict_churn(df: pd.DataFrame) -> dict:
     
     results = []
     for i, (p, prob) in enumerate(zip(predictions, probs)):
-        # Base result with single consistent field name
+        prob_val = float(prob)
+        # Determine risk level based on thresholds
+        if prob_val > high_thresh: risk = "High"
+        elif prob_val > med_thresh: risk = "Medium"
+        else: risk = "Low"
+
         results.append({
             "customer_id": str(df.iloc[i][id_col]) if id_col else str(i + 1),
             "customer_index": i + 1,
             "churn_prediction": "Yes" if p == 1 else "No",
-            "churn_probability": round(float(prob), 3),
-            "risk_level": "High" if prob > 0.7 else "Medium" if prob > 0.4 else "Low"
+            "churn_probability": round(prob_val, 3),
+            "risk_level": risk
         })
         
     churn_count = int(sum(predictions))
@@ -138,5 +147,4 @@ def predict_churn(df: pd.DataFrame) -> dict:
         "churn_rate": round(churn_count / total_count * 100, 2) if total_count > 0 else 0,
         "predictions": results,
         "warnings": validation.get("hints", [])
-
     }

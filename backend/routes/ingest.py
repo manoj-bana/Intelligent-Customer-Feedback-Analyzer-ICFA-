@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Query, Depends
 from pydantic import BaseModel
 import pandas as pd
 import os
@@ -9,14 +9,17 @@ import shutil
 import json
 import base64
 import csv
+import traceback
+import datetime
 from dotenv import load_dotenv
 import google.genai as genai
 from google.genai import types
 from sqlalchemy.orm import Session
 from backend.database.db import SessionLocal
-from backend.database.models import User, Dataset, Notification
+from backend.database.models import User, Dataset, Notification, Organization, SentimentConfig, ChurnConfig
 from backend.utils.sentiment import analyze_sentiment, batch_analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf
 from backend.utils.churn_model import predict_churn
+from backend.auth import get_current_user, get_current_org
 load_dotenv()
 gemini_client = genai.Client()
 
@@ -35,11 +38,25 @@ async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     username: str = Form(...),
-    task_type: str = Form(...)
+    task_type: str = Form(...),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Main ingestion endpoint. Handles file storage and spawns the background worker.
     """
+    # 1. Validation: File Size (max 50MB)
+    MAX_FILE_SIZE = 50 * 1024 * 1024
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Max 50MB.")
+
+    # 2. Validation: MIME Type / Extension
+    file_ext = file.filename.rsplit(".", 1)[-1].lower()
+    if file_ext not in ["csv", "xlsx", "xls"]:
+        raise HTTPException(status_code=400, detail="Invalid file type. Only CSV/Excel allowed.")
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
@@ -57,6 +74,7 @@ async def upload_file(
         new_dataset = Dataset(
             case_id=case_id,
             user_id=user.id,
+            org_id=user.org_id,
             filename=file.filename,
             file_path=file_path,
             task_type=task_type,
@@ -75,17 +93,21 @@ async def upload_file(
         db.close()
 
 @router.get("/cases/{username}")
-def get_user_cases(username: str):
+def get_user_cases(username: str, current_user: User = Depends(get_current_user)):
     """
     Fetch all analysis cases for a specific user.
     """
+    if current_user.username != username and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view these cases")
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.username == username).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+        user = current_user
         
-        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).order_by(Dataset.id.desc()).all()
+        # Isolation: Filter by user.id AND org_id (though org_id is stronger)
+        datasets = db.query(Dataset).filter(
+            Dataset.user_id == user.id,
+            Dataset.org_id == current_user.org_id
+        ).order_by(Dataset.id.desc()).all()
         return {
             "cases": [
                 {
@@ -160,7 +182,16 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
             df_temp.to_csv(new_file_path, index=False)
             file_path = new_file_path
             
-        # STEP 1: PROCESSING START
+        # STEP 1: LOAD TENANT CONFIG
+        sent_cfg = None
+        churn_cfg = None
+        if dataset.org_id:
+            org = db.query(Organization).filter(Organization.id == dataset.org_id).first()
+            if org:
+                sent_cfg = org.sentiment_config
+                churn_cfg = org.churn_config
+        
+        # STEP 2: PROCESSING START
         dataset.review_status = "processing"
         db.commit()
 
@@ -201,13 +232,17 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 chunk_reviews = chunk_df[text_col].fillna("").astype(str).tolist()
                 
                 # PERF: Use batch analysis (single model load, tight loop)
-                chunk_results = batch_analyze_sentiment(chunk_reviews)
+                chunk_results = batch_analyze_sentiment(chunk_reviews, config=sent_cfg)
+                
+                # Get labels for counting
+                p_lbl = getattr(sent_cfg, "pos_label", "Positive")
+                n_lbl = getattr(sent_cfg, "neg_label", "Negative")
                 
                 for res in chunk_results:
                     lbl = res["label"]
                     total += 1
-                    if lbl == "POSITIVE": positive += 1
-                    elif lbl == "NEGATIVE": negative += 1
+                    if lbl == p_lbl: positive += 1
+                    elif lbl == n_lbl: negative += 1
                     else: neutral += 1
                 
                 review_texts_full.extend(chunk_reviews)
@@ -225,6 +260,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                         results_preview.append(item)
                 
                 chunk_df["sentiment_label"] = [r["label"] for r in chunk_results]
+                chunk_df["sentiment_score"] = [r["score"] for r in chunk_results]
                 enriched_chunks.append(chunk_df)
                 rows_processed += len(chunk_df)
 
@@ -244,15 +280,42 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                 
                 def get_dom_sent(x):
                     m = x.mode(); return m[0] if not m.empty else "UNKNOWN"
+                def count_pos(x):
+                    return int((x.str.upper() == 'POSITIVE').sum())
+                def count_neg(x):
+                    return int((x.str.upper() == 'NEGATIVE').sum())
+                def count_neu(x):
+                    return int((x.str.upper() == 'NEUTRAL').sum())
                 def get_churn_score(x):
-                    tot = len(x); return round((x.str.upper() == 'NEGATIVE').sum() / tot, 2) if tot > 0 else 0.0
+                    tot = len(x); return round((x == n_lbl).sum() / tot, 2) if tot > 0 else 0.0
                 
-                agg_df = full_df.groupby(actual_user_col).agg(
-                    Total_Comments=(text_col, 'count'),
-                    Sentiment_Summary=('sentiment_label', get_dom_sent),
-                    Churn_Score=('sentiment_label', get_churn_score)
-                ).reset_index()
-                agg_df.rename(columns={actual_user_col:'User ID', 'Total_Comments':'Total Comments', 'Sentiment_Summary':'Sentiment Summary', 'Churn_Score':'Churn Score'}, inplace=True)
+                # Check if score column exists in full_df
+                score_col_name = next((c for c in full_df.columns if c.lower() in ['score', 'sentiment_score']), None)
+                
+                agg_spec = {
+                    'Positive': ('sentiment_label', count_pos),
+                    'Negative': ('sentiment_label', count_neg),
+                    'Neutral': ('sentiment_label', count_neu),
+                    'Dominant_Sentiment': ('sentiment_label', get_dom_sent),
+                    'Churn_Risk': ('sentiment_label', get_churn_score),
+                }
+                if score_col_name:
+                    agg_spec['Avg_Score'] = (score_col_name, lambda x: round(x.mean(), 3))
+                
+                agg_df = full_df.groupby(actual_user_col).agg(**agg_spec).reset_index()
+                
+                rename_map = {
+                    actual_user_col: 'User ID',
+                    'Positive': '👍 Positive',
+                    'Negative': '👎 Negative',
+                    'Neutral': '😐 Neutral',
+                    'Dominant_Sentiment': 'Dominant Sentiment',
+                    'Churn_Risk': 'Churn Risk',
+                }
+                if score_col_name:
+                    rename_map['Avg_Score'] = 'Sentiment Score'
+                
+                agg_df.rename(columns=rename_map, inplace=True)
                 user_engagement = agg_df.to_dict(orient='records')
 
             enriched_path = file_path.replace(case_id, f"enriched_{case_id}")
@@ -283,7 +346,7 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
                     db.commit()
                 except: db.rollback()
 
-                results = predict_churn(chunk)
+                results = predict_churn(chunk, config=churn_cfg)
                 if "error" in results:
                     if chunk_idx == 0: out_results = results
                     break
@@ -299,22 +362,20 @@ def process_case_background(case_id: str, file_path: str, task_type: str):
         
         # STEP 2: COMPLETE STATUS FIRST (Atomic Update)
         dataset.review_status = "completed"
-        db.commit()
-        db.refresh(dataset)
-        
-        # STEP 3: PERSIST RESULTS FILES
-        results_path = f"{file_path}_results.json"
-        with open(results_path, "w") as f:
-            json.dump(out_results, f)
-            
-        # STEP 4: GENERATE NOTIFICATION SECOND (Zero-Race guaranteed)
+        dataset.result_data = json.dumps(out_results)
+        dataset.last_analyzed = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         dataset.extraction_status = "Complete"
+        db.commit()
+        
+        # STEP 3: GENERATE NOTIFICATION
         create_notification(db, dataset.user_id, f"Report generated successfully: {dataset.filename}")
         
     except Exception as e:
+        print(f"[BACKGROUND] Error processing {case_id}: {traceback.format_exc()}")
         db.rollback()
         if dataset:
-            dataset.review_status = f"failed"
+            dataset.review_status = "failed"
+            dataset.error_message = str(e)
             db.commit()
             create_notification(db, dataset.user_id, f"Error processing report {dataset.filename}: {str(e)}")
     finally:
@@ -424,6 +485,7 @@ def upload_image(
         new_ds = Dataset(
             case_id=case_id,
             user_id=user.id,
+            org_id=user.org_id,
             filename=f"{file.filename.rsplit('.', 1)[0]}.csv",
             file_path=temp_image_path,
             source="image",
@@ -542,7 +604,16 @@ def acknowledge_case(case_id: str):
         db.close()
 
 @router.get("/results/{case_id}")
-def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str = ""):
+def get_case_results(
+    case_id: str, 
+    page: int = 1, 
+    limit: int = 10, 
+    search: str = "", 
+    sentiment: str = None,
+    sort_by: str = None,
+    sort_order: str = "desc",
+    current_user: User = Depends(get_current_user)
+):
     """
     Retrieve analysis results with server-side pagination and search.
     """
@@ -552,25 +623,48 @@ def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str =
         if not dataset:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        results_path = f"{dataset.file_path}_results.json"
-        if not os.path.exists(results_path):
-            raise HTTPException(status_code=404, detail="Results not ready")
+        if dataset.org_id != current_user.org_id and current_user.role != "super_admin":
+            raise HTTPException(status_code=403, detail="Silo violation: Access denied to this organization's data")
 
-        with open(results_path, "r") as f:
-            data = json.load(f)
+        if not dataset.result_data:
+            if dataset.review_status == "failed":
+                raise HTTPException(status_code=500, detail=f"Job failed: {dataset.error_message}")
+            raise HTTPException(status_code=404, detail="Results not ready or not found")
+
+        data = json.loads(dataset.result_data)
 
         # Handle Pagination/Search for 'results' or 'predictions' lists
         list_key = "results" if "results" in data else "predictions"
         if list_key in data:
             full_list = data[list_key]
             
-            # Apply Search
+            # 1. Apply Search
             if search:
                 query = search.lower()
                 full_list = [
                     item for item in full_list 
                     if any(query in str(v).lower() for v in item.values())
                 ]
+            
+            # 2. Apply Sentiment Filter
+            if sentiment and sentiment.lower() != "all":
+                # Matches either 'sentiment_label' or 'label'
+                full_list = [
+                    item for item in full_list 
+                    if str(item.get("sentiment_label", item.get("label", ""))).lower() == sentiment.lower()
+                ]
+
+            # 3. Apply Sorting
+            if sort_by:
+                reverse = (sort_order.lower() == "desc")
+                try:
+                    full_list = sorted(
+                        full_list, 
+                        key=lambda x: (x.get(sort_by) is None, x.get(sort_by)), 
+                        reverse=reverse
+                    )
+                except Exception:
+                    pass # Ignore if sorting fails due to type mismatch
             
             total_count = len(full_list)
             start = (page - 1) * limit
@@ -581,7 +675,7 @@ def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str =
                 "total": total_count,
                 "page": page,
                 "limit": limit,
-                "total_pages": (total_count - 1) // limit + 1
+                "total_pages": (total_count - 1) // limit + 1 if total_count > 0 else 1
             }
             
             # Remove giant CSV if it's not the download request (optional optimization)
@@ -592,58 +686,4 @@ def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str =
         db.close()
 
 # --- Admin Dataset Management ---
-
-@router.get("/admin/all-datasets")
-def get_all_datasets(admin_username: str = Query(...)):
-    """Fetch every dataset in the system (Admin only)."""
-    db = SessionLocal()
-    try:
-        admin = db.query(User).filter(User.username == admin_username).first()
-        if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
-        
-        datasets = db.query(Dataset).order_by(Dataset.id.desc()).all()
-        results = []
-        for d in datasets:
-            owner = db.query(User).filter(User.id == d.user_id).first()
-            results.append({
-                "case_id": d.case_id,
-                "filename": d.filename,
-                "task_type": d.task_type,
-                "review_status": d.review_status,
-                "created_date": d.created_at,
-                "username": owner.username if owner else "Unknown"
-            })
-        return {"datasets": results}
-    finally:
-        db.close()
-
-@router.delete("/admin/datasets/{case_id}")
-def admin_delete_dataset(case_id: str, admin_username: str = Query(...)):
-    """Delete any dataset by ID (Admin only)."""
-    db = SessionLocal()
-    try:
-        admin = db.query(User).filter(User.username == admin_username).first()
-        if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
-        
-        ds = db.query(Dataset).filter(Dataset.case_id == case_id).first()
-        if not ds:
-            raise HTTPException(status_code=404, detail="Dataset not found")
-        
-        # Cleanup files
-        try:
-            if os.path.exists(ds.file_path): os.remove(ds.file_path)
-            res_p = f"{ds.file_path}_results.json"
-            if os.path.exists(res_p): os.remove(res_p)
-            enr_p = ds.file_path.replace(ds.case_id, f"enriched_{ds.case_id}")
-            if os.path.exists(enr_p): os.remove(enr_p)
-        except: pass
-        
-        db.delete(ds)
-        db.commit()
-        return {"message": f"Dataset {case_id} deleted by Admin"}
-    finally:
-        db.close()
+# Admin endpoints removed (now in admin.py)
