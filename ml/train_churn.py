@@ -1,22 +1,19 @@
-"""
-Churn Prediction Model Training Script.
-Handles data preprocessing, feature engineering, and training of a 
-RandomForest model for customer retention analysis.
-"""
 import os
 import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+import matplotlib.pyplot as plt
+from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
+    roc_auc_score,
     confusion_matrix
 )
-
-DATA_PATH = "ml/sample_data/churn_data.csv"
+ 
+DATA_PATH = "data/churn_data.csv"
 MODEL_PATH = "ml/churn_model.pkl"
-
+ 
 FEATURES = [
     "tenure",
     "MonthlyCharges",
@@ -25,77 +22,88 @@ FEATURES = [
     "PaymentMethod",
     "InternetService",
 ]
-
+ 
 def train():
     """
-    Main training pipeline: Load data, preprocess, train, evaluate, and save model.
+    Enhanced training pipeline: Uses XGBoost with imbalance handling and captures feature importance.
     """
-    print("Loading churn dataset...")
+    print("🚀 Initializing Churn Prediction Training (XGBoost Optimized)...")
     if not os.path.exists(DATA_PATH):
-        print(f"Error: {DATA_PATH} not found.")
+        print(f"Error: {DATA_PATH} not found. Please ensure the dataset is in the data/ directory.")
         return
-        
+       
     df = pd.read_csv(DATA_PATH)
-
+ 
+    # 1. Cleaning & Type Correction
     df = df.drop(columns=["customerID"], errors="ignore")
     df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
     df["Churn"] = df["Churn"].map({"Yes": 1, "No": 0})
     df = df.dropna(subset=["Churn", "TotalCharges"])
-
+ 
+    # 2. Feature Selection
     available_features = [f for f in FEATURES if f in df.columns]
-    print(f"Features selected for training: {available_features}")
-
     X = df[available_features].copy()
     y = df["Churn"]
-
-    # One-hot encode categorical variables
+ 
+    # 3. Encoding & Imputation
     X = pd.get_dummies(X, drop_first=True)
-
-    # Impute missing numeric values using median
     X = X.fillna(X.median(numeric_only=True))
-
+ 
+    # 4. Stratified Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y,
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
-
-    print(f"Training set size: {len(X_train)} | Test set size: {len(X_test)}")
-
-    # Initialize professional Random Forest with balanced hyperparameters
-    model = RandomForestClassifier(
+ 
+    # 5. Handle Class Imbalance
+    # Calculate scale factor (count of negative / count of positive)
+    counts = y_train.value_counts()
+    scale_factor = round(counts[0] / counts[1], 2)
+    print(f"Detected class imbalance. Apply scale_pos_weight: {scale_factor}")
+ 
+    # 6. Initialize & Train XGBoost
+    model = XGBClassifier(
         n_estimators=300,
-        max_depth=12,
-        min_samples_split=5,
-        min_samples_leaf=2,
+        learning_rate=0.05,
+        max_depth=6,
+        scale_pos_weight=scale_factor,
         random_state=42,
+        use_label_encoder=False,
+        eval_metric='logloss'
     )
-
+ 
     model.fit(X_train, y_train)
-
-    # Performance Evaluation
+ 
+    # 7. Comprehensive Evaluation
     y_pred = model.predict(X_test)
+    y_probs = model.predict_proba(X_test)[:, 1]
+   
     print("\n" + "=" * 50)
-    print("MODEL EVALUATION SUMMARY")
+    print("📈 ADVANCED MODEL EVALUATION SUMMARY")
     print("=" * 50)
-    print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+    print(f"Accuracy:  {accuracy_score(y_test, y_pred):.4f}")
+    print(f"ROC-AUC:   {roc_auc_score(y_test, y_probs):.4f}")
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred, target_names=["Stay", "Churn"]))
-    
-    print("\nFeature Importance Ranking:")
-    importances = sorted(
-        zip(X.columns, model.feature_importances_), 
-        key=lambda x: -x[1]
-    )
-    for feat, imp in importances:
+   
+    # 8. Feature Importance Ranking & Save Plot
+    print("\n📍 Top Churn Drivers:")
+    importances = pd.Series(model.feature_importances_, index=X.columns).sort_values(ascending=False)
+    for feat, imp in importances.items():
         print(f"  {feat}: {imp:.4f}")
-
-    # Persistence
+ 
+    # Visualizing
+    plt.figure(figsize=(10, 6))
+    importances.sort_values().plot(kind='barh', color='skyblue')
+    plt.title("XGBoost Feature Importance")
+    plt.xlabel("Importance Score")
+    os.makedirs("ml/plots", exist_ok=True)
+    plt.savefig("ml/plots/feature_importance.png")
+    print("\n📊 Feature importance chart saved to ml/plots/feature_importance.png")
+ 
+    # 9. Persistence
     os.makedirs("ml", exist_ok=True)
     joblib.dump(model, MODEL_PATH)
-    print(f"\nModel successfully saved to {MODEL_PATH}")
-
+    print(f"✅ Trained model successfully saved to {MODEL_PATH}")
+ 
 if __name__ == "__main__":
     train()
