@@ -176,6 +176,7 @@ def login(data: LoginRequest):
                     SECRET_KEY,
                     algorithm=ALGORITHM
                 )
+                print(f"[AUTH] Success: {user.username} logged in (Org: {user.org_id}).")
                 return {"access_token": token, "username": user.username, "role": user.role, "org_id": user.org_id}
             else:
                 pass

@@ -32,6 +32,16 @@ def get_notifications(username):
     except: pass
     return []
 
+def nav_link(label, target, current_page):
+    """
+    Helper to render sidebar navigation buttons with active-state styling.
+    """
+    # Use 'primary' type for the currently active page to highlight it
+    is_active = (current_page == target)
+    if st.sidebar.button(label, use_container_width=True, type="primary" if is_active else "secondary"):
+        st.query_params["page"] = target
+        st.rerun()
+
 def inject_premium_css():
     """Injects high-end enterprise styling for glassmorphism and extreme layout density."""
     st.markdown("""
