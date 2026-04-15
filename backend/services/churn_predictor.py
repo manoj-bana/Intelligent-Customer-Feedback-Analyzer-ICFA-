@@ -17,14 +17,13 @@ def load_model():
 
 def predict_churn(df: pd.DataFrame, config: Any = None) -> Dict[str, Any]:
     """
-    Member 4 Responsibility.
     Risk scoring logic based on churn rules and admin configs.
     """
     model = load_model()
     if model is None:
         return {"error": "Model not available."}
 
-    # 1. Config Thresholds (Member 1 config)
+    # 1. Config Thresholds  
     high_thresh = getattr(config, "high_risk_threshold", 0.70)
     med_thresh = getattr(config, "medium_risk_threshold", 0.40)
     churn_threshold = 0.50

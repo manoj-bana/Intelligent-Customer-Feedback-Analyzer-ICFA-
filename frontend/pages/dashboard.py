@@ -4,6 +4,7 @@ import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 from frontend.errors import ERROR_MESSAGES
+from frontend.pages import admin_panel
 import re
 
 import os
@@ -15,12 +16,17 @@ load_dotenv(env_path)
 
 API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
+def get_headers():
+    token = st.session_state.get("token")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+@st.cache_data(ttl=30)
 def get_notifications(username):
     """
     Fetches persistent system notifications from the backend.
     """
     try:
-        res = requests.get(f"{API_URL}/ingest/notifications/{username}", timeout=3)
+        res = requests.get(f"{API_URL}/ingest/notifications/{username}", headers=get_headers(), timeout=3)
         if res.status_code == 200:
             return res.json().get("notifications", [])
     except: pass
@@ -99,10 +105,32 @@ def show():
     query_page = st.query_params.get("page", "🏠 Home")
     role = st.session_state.get("role", "user")
 
+    # --- Sidebar UI Navigation Hub ---
+    def nav_link(label, page_name, current_page, is_indented=False):
+        is_active = (current_page == page_name)
+        prefix = "&nbsp;&nbsp;" if is_indented else ""
+        btn_label = f"{prefix}{label}"
+        
+        # Render columns in the current container (allows placement inside expanders)
+        cols = st.columns([12, 1])
+        with cols[0]:
+            if st.button(btn_label, use_container_width=True, type="primary" if is_active else "secondary", key=f"nav_{page_name}"):
+                st.query_params["page"] = page_name
+                # Set specific task type based on navigation
+                if page_name == "📄 Upload Feedback":
+                    st.query_params["task"] = "Sentiment Analysis"
+                    st.session_state.ingest_task = "Sentiment Analysis"
+                elif page_name == "📊 Upload Churn Data":
+                    st.query_params["task"] = "Churn Prediction"
+                    st.session_state.ingest_task = "Churn Prediction"
+                st.rerun()
+
     # --- Sidebar UI ---
-    st.sidebar.markdown(f"<div style='text-align: center; padding-bottom: 10px;'><h3>👤 {username}</h3><p style='font-size:0.8rem; color:gray; margin-top:-15px;'>{role.capitalize()} • Online</p></div>", unsafe_allow_html=True)
-    nav_link("⚙️ Manage Profile", "👤 Manage Profile", query_page)
-    st.sidebar.divider()
+    with st.sidebar:
+        st.markdown(f"<div style='text-align: center; padding-bottom: 10px;'><h3>👤 {username}</h3><p style='font-size:0.8rem; color:gray; margin-top:-15px;'>{role.capitalize()} • Online</p></div>", unsafe_allow_html=True)
+        nav_link("⚙️ Manage Profile", "👤 Manage Profile", query_page)
+        st.divider()
+
 
     # Collapsible Navigate Section
     with st.sidebar.expander("📌 Navigate", expanded=(query_page in ["🏠 Home", "📄 Upload Feedback", "📊 Upload Churn Data"])):
@@ -126,11 +154,12 @@ def show():
     if role == "admin":
         with st.sidebar.expander("👑 Admin Control", expanded=(query_page in ["👑 Admin Panel", "👥 Manage Users"])):
             nav_link("👑 Panel", "👑 Admin Panel", query_page)
+            nav_link("⚙️ Settings", "⚙️ Admin Settings", query_page)
             nav_link("👥 Users", "👥 Manage Users", query_page)
 
-    # Reduced spacer to bring logout closer to navigation
-    st.sidebar.markdown("<div style='height: 5vh;'></div>", unsafe_allow_html=True)
-    st.sidebar.divider()
+    # Settings at Bottom
+    st.sidebar.markdown("<div style='height: 1vh;'></div>", unsafe_allow_html=True)
+    # Removed dark mode toggle
     
     if st.sidebar.button("🚪 Logout", type="primary", use_container_width=True):
         st.session_state.logged_in = False
@@ -195,7 +224,7 @@ def show():
         </style>
     """, unsafe_allow_html=True)
 
-    @st.fragment(run_every=4)
+    @st.fragment(run_every=15)
     def render_notification_center(username_val):
         all_notifs_local = get_notifications(username_val)
         unread_notifs_local = [n for n in all_notifs_local if n["is_read"] == 0]
@@ -219,7 +248,7 @@ def show():
                     with cv:
                         if n["is_read"] == 0:
                             if st.button("✓", key=f"rd_{n['id']}_{i}"):
-                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", timeout=2); st.rerun()
+                                try: requests.post(f"{API_URL}/ingest/notifications/read/{n['id']}", headers=get_headers(), timeout=2); st.rerun()
                                 except: pass
                 st.divider()
                 st.caption("Latest events shown.")
@@ -243,7 +272,10 @@ def show():
         st.title("🔔 Notifications Center")
         st.info("Check back soon for advanced real-time alerts. Use the bell icon at the top right for now.")
     elif query_page == "👑 Admin Panel":
-        show_admin_panel()
+        admin_panel.show()
+    elif query_page == "⚙️ Admin Settings":
+        from frontend.pages import admin_settings
+        admin_settings.show()
     elif query_page == "👥 Manage Users":
         show_manage_users()
     # Default
@@ -264,7 +296,7 @@ def show_home():
     # Call the isolated auto-refreshing fragment
     render_live_home_metrics(username)
 
-@st.fragment(run_every=5)
+@st.fragment(run_every=15)
 def render_live_home_metrics(username):
     # Fetch live data internally so the numbers ACTUALLY update across polling!
     role = st.session_state.get("role", "user")
@@ -314,6 +346,7 @@ def show_profile_management():
         is_old_valid = False
         if old_p:
             try:
+                # Login check with headers or just credentials
                 res = requests.post(f"{API_URL}/auth/login", json={"username": username, "password": old_p}, timeout=5)
                 if res.status_code == 200:
                     st.markdown('<p class="inline-msg check-valid">✓ Current password verified</p>', unsafe_allow_html=True)
@@ -339,7 +372,7 @@ def show_profile_management():
             elif not all(r[0] for r in rules): st.error("Password requirements not met.")
             else:
                 try:
-                    res = requests.post(f"{API_URL}/auth/change-password", json={"username": username, "old_password": old_p, "new_password": new_p}, timeout=10)
+                    res = requests.post(f"{API_URL}/auth/change-password", json={"username": username, "old_password": old_p, "new_password": new_p}, headers=get_headers(), timeout=10)
                     if res.status_code == 200: st.success("✅ Password updated successfully!"); st.toast("Credentials updated!")
                     else: st.error(f"❌ {res.json().get('detail', 'Update failed')}")
                 except: st.error("❌ Service error. Please try later.")
@@ -357,7 +390,7 @@ def show_profile_management():
                     st.warning("Please provide a reason.")
                 else:
                     try:
-                        res = requests.post(f"{API_URL}/auth/request-admin", json={"username": username, "reason": reason}, timeout=5)
+                        res = requests.post(f"{API_URL}/auth/request-admin", json={"username": username, "reason": reason}, headers=get_headers(), timeout=5)
                         if res.status_code == 200:
                             st.success("✅ Request submitted! Please wait for approval.")
                         else:
@@ -386,24 +419,26 @@ def show_reports_tab():
         from frontend.pages import churn_page
         churn_page.show()
 
+@st.cache_data(ttl=30)
 def get_cases(username):
     """
     Fetches the latest analysis cases for the current user.
     """
     try:
-        res = requests.get(f"{API_URL}/ingest/cases/{username}", timeout=10)
+        res = requests.get(f"{API_URL}/ingest/cases/{username}", headers=get_headers(), timeout=10)
         if res.status_code == 200:
             return res.json().get("cases", [])
     except Exception:
         pass
     return []
 
+@st.cache_data(ttl=30)
 def get_admin_cases(admin_username):
     """
     Fetches EVERY case in the system (Admin only).
     """
     try:
-        res = requests.get(f"{API_URL}/ingest/admin/all-datasets", params={"admin_username": admin_username}, timeout=10)
+        res = requests.get(f"{API_URL}/admin/datasets", headers=get_headers(), timeout=10)
         if res.status_code == 200:
             return res.json().get("datasets", [])
     except Exception:
@@ -543,7 +578,7 @@ def render_cases_fragment(cases_data):
             if "Completed" not in selected_case["review_status"]:
                 if st.button("🔄 Retry", width='stretch', key="btn_retry_case"):
                     try:
-                        retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", timeout=5)
+                        retry_res = requests.post(f"{API_URL}/ingest/cases/{selected_case_id}/retry", headers=get_headers(), timeout=5)
                         if retry_res.status_code == 200:
                             st.success("Task added back to queue!")
                             st.rerun()
@@ -565,8 +600,8 @@ def render_cases_fragment(cases_data):
                     if st.button("✅ Yes", key=f"btn_dy_{selected_case_id}", width='stretch'):
                         try:
                             role = st.session_state.get("role", "user")
-                            endpoint = f"/ingest/admin/datasets/{selected_case_id}" if role == "admin" else f"/ingest/cases/{selected_case_id}"
-                            del_res = requests.delete(f"{API_URL}{endpoint}", params={"admin_username": st.session_state.username} if role == "admin" else {}, timeout=5)
+                            endpoint = f"/admin/datasets/{selected_case_id}" if role == "admin" else f"/ingest/cases/{selected_case_id}"
+                            del_res = requests.delete(f"{API_URL}{endpoint}", headers=get_headers(), timeout=5)
                             if del_res.status_code == 200:
                                 st.session_state.confirm_delete_id = None
                                 st.toast(f"Dataset {selected_case_id} deleted successfully!", icon="🗑️")
@@ -593,7 +628,7 @@ def render_cases_fragment(cases_data):
                     if st.button("💥 YES, ALL", key="btn_del_all_confirm", width='stretch'):
                         try:
                             username = st.session_state.get("username", "")
-                            del_all_res = requests.delete(f"{API_URL}/ingest/cases/all/{username}", timeout=10)
+                            del_all_res = requests.delete(f"{API_URL}/ingest/cases/all/{username}", headers=get_headers(), timeout=10)
                             if del_all_res.status_code == 200:
                                 st.session_state.confirm_delete_all = False
                                 st.toast("All datasets deleted!", icon="🚨")
@@ -619,10 +654,10 @@ def show_admin_panel():
     
     # KPI Row for Admin
     try:
-        users_res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, timeout=5)
+        users_res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, headers=get_headers(), timeout=5)
         total_users = len(users_res.json()["users"]) if users_res.status_code == 200 else 0
         
-        req_res = requests.get(f"{API_URL}/auth/admin-requests", params={"admin_username": admin_user}, timeout=5)
+        req_res = requests.get(f"{API_URL}/auth/admin-requests", params={"admin_username": admin_user}, headers=get_headers(), timeout=5)
         requests_list = req_res.json()["requests"] if req_res.status_code == 200 else []
         pending_reqs = len([r for r in requests_list if r["status"] == "pending"])
         
@@ -649,10 +684,10 @@ def show_admin_panel():
                 with r_col2:
                     if r["status"] == "pending":
                         if st.button("✅ Approve", key=f"app_{r['id']}"):
-                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/approve", params={"admin_username": admin_user})
+                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/approve", params={"admin_username": admin_user}, headers=get_headers())
                             st.rerun()
                         if st.button("❌ Reject", key=f"rej_{r['id']}"):
-                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/reject", params={"admin_username": admin_user})
+                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/reject", params={"admin_username": admin_user}, headers=get_headers())
                             st.rerun()
 
 def show_manage_users():
@@ -661,7 +696,7 @@ def show_manage_users():
     
     admin_user = st.session_state.username
     try:
-        res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, timeout=10)
+        res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, headers=get_headers(), timeout=10)
         users = res.json()["users"]
         
         # Display as a clean table
@@ -680,7 +715,7 @@ def show_manage_users():
             admin_to_demote = st.selectbox("Select Admin to Demote", [u["username"] for u in admins], key="sel_demote")
             if st.button("🔽 Demote to User", use_container_width=True):
                 target_id = [u["id"] for u in admins if u["username"] == admin_to_demote][0]
-                dem_res = requests.post(f"{API_URL}/auth/users/{target_id}/demote", params={"admin_username": admin_user})
+                dem_res = requests.post(f"{API_URL}/auth/users/{target_id}/demote", params={"admin_username": admin_user}, headers=get_headers())
                 if dem_res.status_code == 200:
                     st.success(f"Admin privileges revoked for {admin_to_demote}.")
                     st.rerun()
@@ -697,7 +732,7 @@ def show_manage_users():
             user_to_del = st.selectbox("Select User to Deactivate", [u["username"] for u in users if u["username"] != admin_user and u["is_active"] == 1], key="sel_del")
             if st.button("🚨 Deactivate Account", type="primary", use_container_width=True):
                 user_id = [u["id"] for u in users if u["username"] == user_to_del][0]
-                del_res = requests.delete(f"{API_URL}/auth/users/{user_id}", params={"admin_username": admin_user})
+                del_res = requests.delete(f"{API_URL}/auth/users/{user_id}", params={"admin_username": admin_user}, headers=get_headers())
                 if del_res.status_code == 200:
                     st.success(f"User {user_to_del} deactivated.")
                     st.rerun()
@@ -709,7 +744,7 @@ def show_manage_users():
             user_to_react = st.selectbox("Select User to Restore", [u["username"] for u in users if u["is_active"] == 0], key="sel_react")
             if st.button("✅ Reactivate Account", use_container_width=True):
                 user_id = [u["id"] for u in users if u["username"] == user_to_react][0]
-                react_res = requests.post(f"{API_URL}/auth/users/{user_id}/reactivate", params={"admin_username": admin_user})
+                react_res = requests.post(f"{API_URL}/auth/users/{user_id}/reactivate", params={"admin_username": admin_user}, headers=get_headers())
                 if react_res.status_code == 200:
                     st.success(f"User {user_to_react} restored.")
                     st.rerun()

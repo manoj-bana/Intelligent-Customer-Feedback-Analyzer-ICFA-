@@ -23,8 +23,8 @@ def fetch_churn_data(case_id, page=1, limit=10, search=""):
         )
         if res.status_code == 200:
             return res.json()
-    except Exception as e:
-        print(f"Error fetching data: {e}")
+    except Exception:
+        pass
     return None
 
 def show():

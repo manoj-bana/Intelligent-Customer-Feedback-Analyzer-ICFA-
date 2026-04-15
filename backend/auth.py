@@ -146,7 +146,6 @@ def check_email(email: str = Query(...)):
 @router.post("/login")
 def login(data: LoginRequest):
     """Authenticate a user and return an access token."""
-    print(f"[AUTH] Login attempt for: {data.username}")
     
     # 1. Database check
     db = SessionLocal()
@@ -157,15 +156,12 @@ def login(data: LoginRequest):
             user = db.query(User).filter(User.username.ilike(data.username)).first()
             
         if user:
-            print(f"[AUTH] User found in DB. Verifying password for {user.username}...")
             if verify_password(data.password, user.password):
                 if user.is_active == 0:
-                    print(f"[AUTH] Warning: User {user.username} is deactivated.")
                     raise HTTPException(status_code=403, detail="Account deactivated. Please contact support.")
                 
                 # Auto-upgrade legacy plain-text password
                 if not user.password.startswith('$2b$'):
-                    print(f"[AUTH] Upgrading password for {user.username} to bcrypt.")
                     user.password = hash_password(data.password)
                     db.commit()
 
@@ -183,9 +179,9 @@ def login(data: LoginRequest):
                 print(f"[AUTH] Success: {user.username} logged in (Org: {user.org_id}).")
                 return {"access_token": token, "username": user.username, "role": user.role, "org_id": user.org_id}
             else:
-                print(f"[AUTH] Failed: Password mismatch for {user.username}.")
+                pass
         else:
-            print(f"[AUTH] Failed: User {data.username} not found.")
+            pass
 
         raise HTTPException(status_code=401, detail="Invalid credentials")
     finally:
@@ -203,6 +199,10 @@ def register(data: RegisterRequest):
         raise HTTPException(status_code=400, detail="Invalid email format")
     if len(data.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be 8+ chars")
+    
+    # Security Rule: Prevent hijacking of the admin handle
+    if data.username.lower().strip() == "admin":
+        raise HTTPException(status_code=400, detail="Username 'admin' is reserved for system use.")
 
     db = SessionLocal()
     try:
@@ -367,9 +367,7 @@ def get_admin_requests(admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            # For testing/demo fallback: allow if username is 'admin'
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         requests = db.query(AdminRequest).all()
         return {"requests": [
@@ -391,8 +389,7 @@ def approve_admin_request(request_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         req = db.query(AdminRequest).filter(AdminRequest.id == request_id).first()
         if not req:
@@ -416,8 +413,7 @@ def reject_admin_request(request_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         req = db.query(AdminRequest).filter(AdminRequest.id == request_id).first()
         if not req:
@@ -440,8 +436,7 @@ def get_all_users(admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         users = db.query(User).all()
         return {"users": [
@@ -463,8 +458,7 @@ def delete_user(user_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -486,8 +480,7 @@ def reactivate_user(user_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -507,8 +500,7 @@ def demote_user(user_id: int, admin_username: str = Query(...)):
     try:
         admin = db.query(User).filter(User.username == admin_username).first()
         if not admin or admin.role != "admin":
-            if admin_username != "admin":
-                raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
         
         user = db.query(User).filter(User.id == user_id).first()
         if not user:

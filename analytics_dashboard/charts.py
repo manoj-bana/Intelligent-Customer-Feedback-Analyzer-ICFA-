@@ -19,8 +19,18 @@ def _build_bar_chart(sentiment_series_tuple):
                  color_discrete_map=COLOR_MAP, title='Sentiment Distribution')
     return fig
 
-def generate_sentiment_bar_chart(df):
-    counts = df['sentiment_label'].str.upper().value_counts()
+def generate_sentiment_bar_chart(df=None, counts_dict=None):
+    if counts_dict:
+        counts = pd.Series({k.upper(): v for k, v in counts_dict.items()})
+    elif df is not None:
+        counts = df['sentiment_label'].str.upper().value_counts()
+    else:
+        counts = pd.Series({'POSITIVE': 0, 'NEUTRAL': 0, 'NEGATIVE': 0})
+        
+    # Ensure all labels exist for consistent visualization
+    for lbl in ["POSITIVE", "NEUTRAL", "NEGATIVE"]:
+        if lbl not in counts:
+            counts[lbl] = 0
     fig = _build_bar_chart(tuple(counts.items()))
     st.plotly_chart(fig, width='stretch')
 
@@ -33,8 +43,18 @@ def _build_pie_chart(sentiment_series_tuple):
                  color_discrete_map=COLOR_MAP, title='Sentiment Share')
     return fig
 
-def generate_sentiment_pie_chart(df):
-    counts = df['sentiment_label'].str.upper().value_counts()
+def generate_sentiment_pie_chart(df=None, counts_dict=None):
+    if counts_dict:
+        counts = pd.Series({k.upper(): v for k, v in counts_dict.items()})
+    elif df is not None:
+        counts = df['sentiment_label'].str.upper().value_counts()
+    else:
+        counts = pd.Series({'POSITIVE': 0, 'NEUTRAL': 0, 'NEGATIVE': 0})
+        
+    # Ensure all labels exist for consistent visualization
+    for lbl in ["POSITIVE", "NEUTRAL", "NEGATIVE"]:
+        if lbl not in counts:
+            counts[lbl] = 0
     fig = _build_pie_chart(tuple(counts.items()))
     st.plotly_chart(fig, width='stretch')
 

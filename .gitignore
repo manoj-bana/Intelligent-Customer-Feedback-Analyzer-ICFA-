@@ -23,10 +23,12 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
 .vscode/
 .env
 .env.*
+!.env.example
 
 # Database
 icfa.db
@@ -42,3 +44,9 @@ data/*.csv
 .streamlit/
 *.pkl
 uploads/*.json
+!ml/churn_model.pkl
+!ml/sentiment_model.pkl
+!ml/vectorizer.pkl
+ml/plots/
+test_keywords.py
+*.zip

@@ -180,7 +180,7 @@ async def retry_case(case_id: str, background_tasks: BackgroundTasks):
     finally:
         db.close()
 
-# --- Image Extraction
+# --- Image Extraction ---
 
 import google.genai as genai
 from google.genai import types
@@ -378,7 +378,16 @@ def delete_case(case_id: str, current_user: User = Depends(get_current_user)):
         db.close()
 
 @router.get("/results/{case_id}")
-def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str = "", current_user: User = Depends(get_current_user)):
+def get_case_results(
+    case_id: str, 
+    page: int = 1, 
+    limit: int = 10, 
+    search: str = "",
+    sentiment: str = None,
+    sort_by: str = None,
+    sort_order: str = "desc",
+    current_user: User = Depends(get_current_user)
+):
     db = SessionLocal()
     try:
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
@@ -389,13 +398,35 @@ def get_case_results(case_id: str, page: int = 1, limit: int = 10, search: str =
             
         data = json.loads(dataset.result_data)
         
-        # Pagination Logic
+        # Pagination, Search, Filter Logic
         list_key = "results" if "results" in data else "predictions"
         if list_key in data:
             full_list = data[list_key]
+            
+            # 1. Apply Search
             if search:
                 q = search.lower()
                 full_list = [i for i in full_list if any(q in str(v).lower() for v in i.values())]
+            
+            # 2. Apply Sentiment Filter
+            if sentiment and sentiment.lower() != "all":
+                sent_lower = sentiment.lower()
+                full_list = [
+                    item for item in full_list
+                    if str(item.get("sentiment_label", item.get("label", ""))).lower() == sent_lower
+                ]
+            
+            # 3. Apply Sorting
+            if sort_by:
+                reverse = (sort_order.lower() == "desc")
+                try:
+                    full_list = sorted(
+                        full_list,
+                        key=lambda x: (x.get(sort_by) is None, x.get(sort_by)),
+                        reverse=reverse
+                    )
+                except Exception:
+                    pass
             
             total = len(full_list)
             start = (page - 1) * limit

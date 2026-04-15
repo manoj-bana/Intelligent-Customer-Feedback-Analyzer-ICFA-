@@ -5,7 +5,6 @@ from backend.database.db import Base
 class CompanyConfig(Base):
     """
     Unified configuration table for multi-tenant settings.
-    Member 1 Responsibility.
     """
     __tablename__ = "company_configs"
     
@@ -25,7 +24,7 @@ class CompanyConfig(Base):
     medium_risk_threshold = Column(Float, default=0.40)
     churn_rules = Column(JSON, nullable=True) # Logic rules for predictability
     
-    # Mapping Settings (Member 2 coordination)
+    # Mapping Settings
     column_mapper = Column(JSON, nullable=True) 
     
     organization = relationship("backend.database.models.Organization", back_populates="config")
