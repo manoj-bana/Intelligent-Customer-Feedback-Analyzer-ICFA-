@@ -176,13 +176,24 @@ def show():
         if uploaded_file is not None:
             # Quick preview / validation summary
             st.info(f"Selected: **{uploaded_file.name}**")
-            
+
+            # Build a unique key for the current file + task combination
+            current_upload_key = f"{uploaded_file.name}::{st.session_state.ingest_task}"
+            last_upload_key = st.session_state.get("last_upload_key", "")
+
             if st.button("📦 Process Dataset", use_container_width=True, type="primary"):
-                is_valid, error_msg = validate_dataset(uploaded_file, st.session_state.ingest_task)
-                if not is_valid:
-                    st.error(error_msg)
+                if current_upload_key == last_upload_key:
+                    st.warning(
+                        f"⚠️ **Duplicate Upload Detected:** `{uploaded_file.name}` has already been "
+                        f"submitted for **{st.session_state.ingest_task}**. "
+                        "Please select a different file or switch the task type."
+                    )
                 else:
-                    _handle_csv_upload(uploaded_file, st.session_state.ingest_task)
+                    is_valid, error_msg = validate_dataset(uploaded_file, st.session_state.ingest_task)
+                    if not is_valid:
+                        st.error(error_msg)
+                    else:
+                        _handle_csv_upload(uploaded_file, st.session_state.ingest_task)
         else:
             # Placeholder/Empty State
             st.markdown("""
@@ -255,9 +266,14 @@ def _handle_csv_upload(uploaded_file, task_type: str):
                     "analyzed in the background. Check your Home dashboard for status updates."
                 )
                 
-                # Reset file uploader by clearing its state if possible
-                # Or simply inform the user to select another file
+                # Mark this file+task combo as processed to block duplicate submissions
+                st.session_state["last_upload_key"] = f"{uploaded_file.name}::{task_type}"
                 st.session_state["file_processed"] = True
+            elif response.status_code == 409:
+                st.warning(
+                    f"⚠️ **Already In Queue:** `{uploaded_file.name}` is already being processed "
+                    "for this task type. Check your Home dashboard for its status."
+                )
             else:
                 st.error(f"Ingestion failed: {response.text}")
 

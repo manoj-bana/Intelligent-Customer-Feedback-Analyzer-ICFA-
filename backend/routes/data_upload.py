@@ -44,25 +44,60 @@ async def upload_file(
     
     db = SessionLocal()
     try:
-        case_id = str(uuid.uuid4())[:8]
-        file_name = f"{case_id}_{file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, file_name)
+        # --- Upsert Logic: Check for existing record with same filename + user + task ---
+        existing = db.query(Dataset).filter(
+            Dataset.user_id == current_user.id,
+            Dataset.filename == file.filename,
+            Dataset.task_type == task_type
+        ).first()
 
+        if existing:
+            # CASE 1: File is currently being processed — block the re-upload
+            if existing.review_status in ["pending", "processing"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"'{file.filename}' is already queued or being processed for "
+                        f"{task_type} (Case ID: {existing.case_id}). "
+                        "Wait for it to complete before re-uploading."
+                    )
+                )
+
+            # CASE 2: File previously completed/failed — UPDATE existing record (Upsert)
+            case_id = existing.case_id
+            dataset = existing
+            dataset.review_status = "pending"
+            dataset.extraction_status = "Queued"
+            dataset.result_data = None
+            dataset.error_message = None
+            dataset.created_at = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+            # Overwrite the file on disk at the existing path
+            file_path = dataset.file_path
+        else:
+            # CASE 3: Brand new file — INSERT a new row
+            case_id = str(uuid.uuid4())[:8]
+            file_name = f"{case_id}_{file.filename}"
+            file_path = os.path.join(UPLOAD_DIR, file_name)
+
+            dataset = Dataset(
+                case_id=case_id,
+                user_id=current_user.id,
+                org_id=current_user.org_id,
+                filename=file.filename,
+                file_path=file_path,
+                task_type=task_type,
+                review_status="pending"
+            )
+            db.add(dataset)
+
+        # Save/overwrite the file content on disk
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        new_dataset = Dataset(
-            case_id=case_id,
-            user_id=current_user.id,
-            org_id=current_user.org_id,
-            filename=file.filename,
-            file_path=file_path,
-            task_type=task_type,
-            review_status="pending"
-        )
-        db.add(new_dataset)
         db.commit()
-        
+        db.refresh(dataset)
+
         background_tasks.add_task(process_data_pipeline, case_id, file_path, task_type)
         return {"message": "Upload successful", "case_id": case_id}
     finally:

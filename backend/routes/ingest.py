@@ -63,28 +63,60 @@ async def upload_file(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        case_id = str(uuid.uuid4())[:8]
-        file_ext = file.filename.rsplit(".", 1)[-1].lower()
-        file_name = f"{case_id}_{file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, file_name)
+        # --- Upsert logic: Update existing record if found, else create new ---
+        existing = db.query(Dataset).filter(
+            Dataset.user_id == user.id,
+            Dataset.filename == file.filename,
+            Dataset.task_type == task_type
+        ).first()
 
+        if existing:
+            if existing.review_status in ["pending", "processing"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"'{file.filename}' is already queued or being processed for "
+                        f"{task_type} (Case ID: {existing.case_id}). "
+                        "Wait for it to complete before re-uploading."
+                    )
+                )
+            
+            # If completed/failed, we RE-USE the existing record (Upsert)
+            case_id = existing.case_id
+            dataset = existing
+            dataset.review_status = "pending"
+            dataset.extraction_status = "1 of 1"
+            dataset.result_data = None
+            dataset.error_message = None
+            dataset.created_at = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Use existing file path but we will overwrite the file
+            file_path = dataset.file_path
+        else:
+            # Create a brand new record
+            case_id = str(uuid.uuid4())[:8]
+            file_name = f"{case_id}_{file.filename}"
+            file_path = os.path.join(UPLOAD_DIR, file_name)
+            
+            dataset = Dataset(
+                case_id=case_id,
+                user_id=user.id,
+                org_id=user.org_id,
+                filename=file.filename,
+                file_path=file_path,
+                task_type=task_type,
+                review_status="pending"
+            )
+            db.add(dataset)
+
+        # Overwrite/Save file content
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        new_dataset = Dataset(
-            case_id=case_id,
-            user_id=user.id,
-            org_id=user.org_id,
-            filename=file.filename,
-            file_path=file_path,
-            task_type=task_type,
-            review_status="pending"
-        )
-        db.add(new_dataset)
         db.commit()
-        db.refresh(new_dataset)
+        db.refresh(dataset)
 
-        # Notify user instantly that processing has started
+        # Notify user instantly
         create_notification(db, user.id, f"Processing started: {file.filename} is now being analyzed.")
         
         background_tasks.add_task(process_case_background, case_id, file_path, task_type)
