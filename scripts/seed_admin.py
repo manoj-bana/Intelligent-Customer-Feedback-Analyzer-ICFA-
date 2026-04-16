@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # Add the project root to sys.path so we can import backend
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.database.db import SessionLocal
+from backend.database.db import SessionLocal, engine, Base
 from backend.database.models import User, Organization
 from backend.database.db import engine, Base
 
@@ -25,7 +25,8 @@ def seed_admin():
         print("Error: ADMIN_EMAIL and ADMIN_PASSWORD must be set in .env")
         return
 
-    # Ensure all tables are created before seeding (safe when running script standalone)
+    # Ensure tables exist
+    print("Initializing database tables...")
     Base.metadata.create_all(bind=engine)
 
     db: Session = SessionLocal()
@@ -39,7 +40,12 @@ def seed_admin():
         # Check if username 'admin' is taken
         user_with_admin_name = db.query(User).filter(User.username == "admin").first()
         if user_with_admin_name:
-            print("Username 'admin' is already taken by a non-admin user. Please resolve manually.")
+            print(f"Found existing user '{user_with_admin_name.username}'. Promoting to Admin role...")
+            user_with_admin_name.role = "admin"
+            user_with_admin_name.email = admin_email
+            user_with_admin_name.password = hash_password(admin_password)
+            db.commit()
+            print("Successfully promoted existing 'admin' user to Admin role.")
             return
 
         # Create Default Organization if none exists

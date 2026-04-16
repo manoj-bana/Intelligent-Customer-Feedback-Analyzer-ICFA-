@@ -177,8 +177,45 @@ def show():
                 except Exception as e:
                     st.error(f"Processing error: {e}")
 
-
     if "analysis_results" in st.session_state:
+        # --- Chart Type Selection (New Requirement) ---
+        chart_opts = [
+            "Sentiment Distribution (Bar)", 
+            "Sentiment Share (Pie)",
+            "Sentiment Over Time (Trends)",
+            "Top Keywords (Chart)",
+            "All Visualizations (Grid)"
+        ]
+        
+        # Canonical state: 'viz_choice'
+        if "viz_choice" not in st.session_state:
+            st.session_state.viz_choice = "All Visualizations (Grid)"
+            
+        c_sel, _ = st.columns([2, 2])
+        with c_sel:
+            # Sync function for selectbox
+            def on_viz_change():
+                st.session_state.viz_choice = st.session_state.viz_selector_widget
+
+            st.selectbox(
+                "Select View Chart", 
+                chart_opts, 
+                index=chart_opts.index(st.session_state.viz_choice) if st.session_state.viz_choice in chart_opts else 4,
+                key="viz_selector_widget",
+                on_change=on_viz_change
+            )
+
+        # Chart-type Icons
+        icon_cols = st.columns(len(chart_opts))
+        icons = ["📊", "🥧", "📈", "🏷️", "🏁"]
+        for i, (opt, icon) in enumerate(zip(chart_opts, icons)):
+            with icon_cols[i]:
+                is_active = st.session_state.viz_choice == opt
+                btn_label = f"{icon}"
+                if st.button(btn_label, key=f"btn_chart_icon_{i}", help=opt, use_container_width=True, type="primary" if is_active else "secondary"):
+                    st.session_state.viz_choice = opt
+                    st.rerun()
+
         # Self-healing data restoration
         df_enriched = st.session_state.get("processed_enriched_df")
         agg_df = st.session_state.get("processed_agg_df")
@@ -273,16 +310,37 @@ def render_user_aggregation_fragment_v2(agg_df_all):
             if sentiment_col:
                 unique_sentiments = sorted(agg_df_all[sentiment_col].dropna().unique().tolist())
                 filter_opts = ["All Sentiments"] + unique_sentiments
+                
+                # Global Synchronizer: Ensure chart selection is reflected in dropdown
+                if st.session_state.get("selected_sentiment") and st.session_state.selected_sentiment != "All":
+                    st.session_state.agg_sentiment_filter = st.session_state.selected_sentiment
+
+                # Ensure the selection from chart exists in filter_opts
+                current_sel = st.session_state.get("agg_sentiment_filter", "All Sentiments")
+                if current_sel not in filter_opts and current_sel != "All Sentiments":
+                    # Try to match case-insensitively
+                    match = next((o for o in filter_opts if o.lower() == current_sel.lower()), None)
+                    if match:
+                        st.session_state.agg_sentiment_filter = match
+                    else:
+                        st.session_state.agg_sentiment_filter = "All Sentiments"
+
                 agg_sentiment_filter = st.selectbox(
                     "Filter Sentiment", filter_opts, 
                     key="agg_sentiment_filter", label_visibility="collapsed"
                 )
+                # Update global state if dropdown changed
+                st.session_state.selected_sentiment = agg_sentiment_filter if agg_sentiment_filter != "All Sentiments" else "All"
             else:
                 agg_sentiment_filter = "All Sentiments"
         with c_search:
             st.button("🔍 Search", use_container_width=True, key="btn_agg_search")
         with c_clear:
-            st.button("🗑️ Clear", use_container_width=True, key="btn_agg_clear", on_click=clear_agg_search)
+            def on_clear_all():
+                st.session_state.agg_q_in = ""
+                st.session_state.agg_sentiment_filter = "All Sentiments"
+                st.session_state.selected_sentiment = "All"
+            st.button("🗑️ Clear", use_container_width=True, key="btn_agg_clear", on_click=on_clear_all)
 
     agg_df = agg_df_all.copy()
     
@@ -376,42 +434,75 @@ def render_visualizations(data, df_to_plot):
     st.subheader("📈 Visual Insights")
     
     # 1. Prepare data sources
-    # Global counts for summary charts
     global_counts = {
         "POSITIVE": data.get("positive", 0),
         "NEGATIVE": data.get("negative", 0),
         "NEUTRAL": data.get("neutral", 0)
     }
     
-    chart_opts = [
-        "All Visualizations (Grid)", 
-        "Sentiment Distribution (Bar)", 
-        "Sentiment Share (Pie)",
-        "Sentiment Over Time (Trends)",
-        "Top Keywords (Chart)"
-    ]
-    selected_chart = st.selectbox("Select Chart View", chart_opts, key="viz_selector")
-    
+    if "selected_sentiment" not in st.session_state:
+        st.session_state.selected_sentiment = "All"
+        
+    selected_chart = st.session_state.get("viz_choice", "All Visualizations (Grid)")
+
+    def handle_click(selection):
+        if selection and selection.get("selection") and selection["selection"].get("points"):
+            point = selection["selection"]["points"][0]
+            
+            # Deep Search: Iterate through ALL point metadata to find a sentiment label.
+            # This handles variation in Plotly's internal event structure between chart types.
+            candidates = []
+            
+            # 1. Broad scan of all values in the point dict
+            for v in point.values():
+                if isinstance(v, str): candidates.append(v)
+                elif isinstance(v, list) and v: candidates.append(v[0])
+            
+            # 2. Check nested customdata if present
+            cd = point.get('customdata')
+            if isinstance(cd, list): candidates.extend(cd)
+            elif cd: candidates.append(cd)
+            
+            # 3. Validation and Extraction
+            for raw_val in candidates:
+                if not isinstance(raw_val, str): continue
+                
+                val_upper = raw_val.strip().upper()
+                if val_upper in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
+                    sentiment = val_upper.capitalize()
+                    
+                    if st.session_state.get("selected_sentiment") != sentiment:
+                        st.session_state.selected_sentiment = sentiment
+                        st.session_state.agg_sentiment_filter = sentiment
+                        st.rerun()
+                    return
+
     if selected_chart == "All Visualizations (Grid)":
         c1, c2 = st.columns(2)
         with c1:
-            generate_sentiment_bar_chart(counts_dict=global_counts)
-            generate_sentiment_line_chart(df_to_plot)
+            res_bar = generate_sentiment_bar_chart(counts_dict=global_counts, key="viz_bar_grid")
+            handle_click(res_bar)
+            res_line = generate_sentiment_line_chart(df_to_plot, key="viz_line_grid")
+            handle_click(res_line)
         with c2:
-            generate_sentiment_pie_chart(counts_dict=global_counts)
+            res_pie = generate_sentiment_pie_chart(counts_dict=global_counts, key="viz_pie_grid")
+            handle_click(res_pie)
             # Transform keyword data for chart
             freq_data = [(k["word"], k["count"]) for k in data.get("freq_keywords", [])]
-            generate_keyword_frequency_chart(freq_data)
+            generate_keyword_frequency_chart(freq_data, key="viz_kw_grid")
                 
     elif selected_chart == "Sentiment Distribution (Bar)":
-        generate_sentiment_bar_chart(counts_dict=global_counts)
+        res = generate_sentiment_bar_chart(counts_dict=global_counts, key="viz_bar_solo")
+        handle_click(res)
     elif selected_chart == "Sentiment Share (Pie)":
-        generate_sentiment_pie_chart(counts_dict=global_counts)
+        res = generate_sentiment_pie_chart(counts_dict=global_counts, key="viz_pie_solo")
+        handle_click(res)
     elif selected_chart == "Sentiment Over Time (Trends)":
-        generate_sentiment_line_chart(df_to_plot)
+        res = generate_sentiment_line_chart(df_to_plot, key="viz_line_solo")
+        handle_click(res)
     elif selected_chart == "Top Keywords (Chart)":
         freq_data = [(k["word"], k["count"]) for k in data.get("freq_keywords", [])]
-        generate_keyword_frequency_chart(freq_data)
+        generate_keyword_frequency_chart(freq_data, key="viz_kw_solo")
 
 def render_user_aggregation_backend(user_engagement):
     """

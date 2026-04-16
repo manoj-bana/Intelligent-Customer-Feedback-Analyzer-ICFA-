@@ -177,8 +177,9 @@ def show():
             # Quick preview / validation summary
             st.info(f"Selected: **{uploaded_file.name}**")
 
-            # Build a unique key for the current file + task combination
-            current_upload_key = f"{uploaded_file.name}::{st.session_state.ingest_task}"
+            # Build a unique key for the current user + file + task combination
+            username = st.session_state.get("username", "guest")
+            current_upload_key = f"{username}::{uploaded_file.name}::{st.session_state.ingest_task}"
             last_upload_key = st.session_state.get("last_upload_key", "")
 
             if st.button("📦 Process Dataset", use_container_width=True, type="primary"):
@@ -266,8 +267,8 @@ def _handle_csv_upload(uploaded_file, task_type: str):
                     "analyzed in the background. Check your Home dashboard for status updates."
                 )
                 
-                # Mark this file+task combo as processed to block duplicate submissions
-                st.session_state["last_upload_key"] = f"{uploaded_file.name}::{task_type}"
+                # Mark this user + file + task combo as processed
+                st.session_state["last_upload_key"] = f"{username}::{uploaded_file.name}::{task_type}"
                 st.session_state["file_processed"] = True
             elif response.status_code == 409:
                 st.warning(

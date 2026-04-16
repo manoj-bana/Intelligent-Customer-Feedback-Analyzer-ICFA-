@@ -99,6 +99,7 @@ def predict_churn(df: pd.DataFrame, config=None) -> dict:
     # 1. Load config values
     high_thresh = config.high_risk_threshold if config and hasattr(config, "high_risk_threshold") else 0.70
     med_thresh = config.medium_risk_threshold if config and hasattr(config, "medium_risk_threshold") else 0.40
+    low_thresh = config.low_risk_threshold if config and hasattr(config, "low_risk_threshold") else 0.10
 
     model = load_churn_model()
     if model is None:
@@ -128,7 +129,8 @@ def predict_churn(df: pd.DataFrame, config=None) -> dict:
         # Determine risk level based on thresholds
         if prob_val > high_thresh: risk = "High"
         elif prob_val > med_thresh: risk = "Medium"
-        else: risk = "Low"
+        elif prob_val > low_thresh: risk = "Low"
+        else: risk = "Safe"
 
         results.append({
             "customer_id": str(df.iloc[i][id_col]) if id_col else str(i + 1),

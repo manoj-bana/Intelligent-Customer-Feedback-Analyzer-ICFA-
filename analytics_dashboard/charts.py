@@ -16,10 +16,11 @@ def _build_bar_chart(sentiment_series_tuple):
     sentiment_counts = pd.Series(dict(sentiment_series_tuple)).reset_index()
     sentiment_counts.columns = ['Sentiment', 'Count']
     fig = px.bar(sentiment_counts, x='Sentiment', y='Count', color='Sentiment',
-                 color_discrete_map=COLOR_MAP, title='Sentiment Distribution')
+                 color_discrete_map=COLOR_MAP, title='Sentiment Distribution',
+                 custom_data=['Sentiment'])
     return fig
 
-def generate_sentiment_bar_chart(df=None, counts_dict=None):
+def generate_sentiment_bar_chart(df=None, counts_dict=None, on_select="rerun", key=None):
     if counts_dict:
         counts = pd.Series({k.upper(): v for k, v in counts_dict.items()})
     elif df is not None:
@@ -32,7 +33,8 @@ def generate_sentiment_bar_chart(df=None, counts_dict=None):
         if lbl not in counts:
             counts[lbl] = 0
     fig = _build_bar_chart(tuple(counts.items()))
-    st.plotly_chart(fig, width='stretch')
+    # Set selection mode to 'points' or similar if needed, but default is usually fine
+    return st.plotly_chart(fig, use_container_width=True, on_select=on_select, key=key)
 
 @st.cache_data
 def _build_pie_chart(sentiment_series_tuple):
@@ -40,10 +42,12 @@ def _build_pie_chart(sentiment_series_tuple):
     sentiment_counts = pd.Series(dict(sentiment_series_tuple)).reset_index()
     sentiment_counts.columns = ['Sentiment', 'Count']
     fig = px.pie(sentiment_counts, names='Sentiment', values='Count', color='Sentiment',
-                 color_discrete_map=COLOR_MAP, title='Sentiment Share')
+                 color_discrete_map=COLOR_MAP, title='Sentiment Share',
+                 custom_data=['Sentiment'])
+    fig.update_traces(textposition='inside', textinfo='percent+label')
     return fig
 
-def generate_sentiment_pie_chart(df=None, counts_dict=None):
+def generate_sentiment_pie_chart(df=None, counts_dict=None, on_select="rerun", key=None):
     if counts_dict:
         counts = pd.Series({k.upper(): v for k, v in counts_dict.items()})
     elif df is not None:
@@ -56,17 +60,18 @@ def generate_sentiment_pie_chart(df=None, counts_dict=None):
         if lbl not in counts:
             counts[lbl] = 0
     fig = _build_pie_chart(tuple(counts.items()))
-    st.plotly_chart(fig, width='stretch')
+    return st.plotly_chart(fig, use_container_width=True, on_select=on_select, key=key)
 
 @st.cache_data
 def _build_line_chart(trend_data_tuple):
     """Cached: builds Plotly line chart JSON from trend data."""
     trend = pd.DataFrame(trend_data_tuple, columns=['date_only', 'sentiment_label', 'Count'])
     fig = px.line(trend, x='date_only', y='Count', color='sentiment_label',
-                  color_discrete_map=COLOR_MAP, title='Sentiment Over Time', markers=True)
+                  color_discrete_map=COLOR_MAP, title='Sentiment Over Time', markers=True,
+                  custom_data=['sentiment_label'])
     return fig
 
-def generate_sentiment_line_chart(df):
+def generate_sentiment_line_chart(df, on_select="rerun", key=None):
     # More robust date column detection
     # First exact math
     date_candidates = ['date', 'timestamp', 'created_at', 'time', 'review date', 'review_date', 'year', 'dt']
@@ -100,12 +105,12 @@ def generate_sentiment_line_chart(df):
             # Convert to tuple of tuples for caching
             trend_tuple = tuple(trend.itertuples(index=False, name=None))
             fig = _build_line_chart(trend_tuple)
-            st.plotly_chart(fig, use_container_width=True)
+            return st.plotly_chart(fig, use_container_width=True, on_select=on_select, key=key)
         else:
             st.info(f"No valid dates found in column '{actual_date_col}' for Sentiment Over Time chart.")
     else:
         st.info(f"No timeline data (date/time column) available for Sentiment Over Time chart. Available columns: {list(df.columns)}")
-
+    return None
 
 @st.cache_data
 def _build_keyword_chart(freq_data_tuple):
@@ -116,13 +121,12 @@ def _build_keyword_chart(freq_data_tuple):
     fig.update_layout(yaxis={'categoryorder': 'total ascending'})
     return fig
 
-@st.cache_data
-def generate_keyword_frequency_chart(freq_data):
+def generate_keyword_frequency_chart(freq_data, on_select="rerun", key=None):
     if not freq_data:
         st.info("No keywords available.")
-        return
+        return None
     df_kw = pd.DataFrame(freq_data, columns=['Keyword', 'Frequency'])
     fig = px.bar(df_kw, x='Frequency', y='Keyword', orientation='h', title='Top 10 Keywords',
                  color_discrete_sequence=['#17a2b8'])
     fig.update_layout(yaxis={'categoryorder': 'total ascending'})
-    st.plotly_chart(fig, use_container_width=True)
+    return st.plotly_chart(fig, use_container_width=True, on_select=on_select, key=key)

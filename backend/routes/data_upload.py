@@ -11,7 +11,7 @@ import csv
 import traceback
 import datetime
 from sqlalchemy.orm import Session
-from backend.database.db import SessionLocal
+from backend.database.db import SessionLocal, get_db
 from backend.database.models import User, Dataset, Notification, Organization
 from backend.models.config import CompanyConfig
 from backend.services.feedback_classifier import batch_analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf
@@ -30,26 +30,26 @@ async def upload_file(
     file: UploadFile = File(...),
     username: str = Form(...),
     task_type: str = Form(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     MAX_FILE_SIZE = 50 * 1024 * 1024
-    file.file.seek(0, 2)
-    if file.file.tell() > MAX_FILE_SIZE:
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Max 50MB.")
-    file.file.seek(0)
+    await file.seek(0)
 
-    file_ext = file.filename.rsplit(".", 1)[-1].lower()
+    file_ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename else ""
     if file_ext not in ["csv", "xlsx", "xls"]:
         raise HTTPException(status_code=400, detail="Invalid file type. Only CSV/Excel allowed.")
     
-    db = SessionLocal()
     try:
         case_id = str(uuid.uuid4())[:8]
         file_name = f"{case_id}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, file_name)
 
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(content)
 
         new_dataset = Dataset(
             case_id=case_id,
@@ -58,15 +58,17 @@ async def upload_file(
             filename=file.filename,
             file_path=file_path,
             task_type=task_type,
-            review_status="pending"
+            review_status="pending",
+            notification_seen=0
         )
         db.add(new_dataset)
         db.commit()
         
         background_tasks.add_task(process_data_pipeline, case_id, file_path, task_type)
         return {"message": "Upload successful", "case_id": case_id}
-    finally:
-        db.close()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 def process_data_pipeline(case_id: str, file_path: str, task_type: str):
     db = SessionLocal()
@@ -157,11 +159,10 @@ def process_data_pipeline(case_id: str, file_path: str, task_type: str):
         db.close()
 
 @router.post("/cases/{case_id}/retry")
-async def retry_case(case_id: str, background_tasks: BackgroundTasks):
+async def retry_case(case_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Reprocess a case that might have failed or needs updating.
     """
-    db = SessionLocal()
     try:
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not dataset:
@@ -177,8 +178,9 @@ async def retry_case(case_id: str, background_tasks: BackgroundTasks):
             task_type=dataset.task_type
         )
         return {"message": "Case queued"}
-    finally:
-        db.close()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Image Extraction ---
 
@@ -304,11 +306,10 @@ def upload_image(
 
 
 @router.delete("/cases/all/{username}")
-def delete_all_cases(username: str):
+def delete_all_cases(username: str, db: Session = Depends(get_db)):
     """
     Delete all cases and associated files for a user.
     """
-    db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
         if not user:
@@ -318,17 +319,19 @@ def delete_all_cases(username: str):
         datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
         for ds in datasets:
             try:
-                if os.path.exists(ds.file_path): os.remove(ds.file_path)
-            except: pass
+                if os.path.exists(ds.file_path): 
+                    os.remove(ds.file_path)
+            except: 
+                pass
             db.delete(ds)
         db.commit()
         return {"message": "All cases deleted"}
-    finally:
-        db.close()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/cases/{username}")
-def get_user_cases(username: str, current_user: User = Depends(get_current_user)):
-    db = SessionLocal()
+def get_user_cases(username: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.username == username).first()
         if not user: raise HTTPException(status_code=404, detail="User not found")
@@ -351,12 +354,11 @@ def get_user_cases(username: str, current_user: User = Depends(get_current_user)
                 for d in datasets
             ]
         }
-    finally:
-        db.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/notifications/{username}")
-def get_notifications(username: str, current_user: User = Depends(get_current_user)):
-    db = SessionLocal()
+def get_notifications(username: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.username == username).first()
         if not user: raise HTTPException(status_code=404, detail="User not found")
@@ -367,24 +369,23 @@ def get_notifications(username: str, current_user: User = Depends(get_current_us
                 for n in notifs
             ]
         }
-    finally:
-        db.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/notifications/read/{notif_id}")
-def mark_notification_read(notif_id: int):
-    db = SessionLocal()
+def mark_notification_read(notif_id: int, db: Session = Depends(get_db)):
     try:
         notif = db.query(Notification).filter(Notification.id == notif_id).first()
         if notif:
             notif.is_read = 1
             db.commit()
         return {"message": "Updated"}
-    finally:
-        db.close()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/cases/{case_id}")
-def delete_case(case_id: str, current_user: User = Depends(get_current_user)):
-    db = SessionLocal()
+def delete_case(case_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         ds = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not ds: raise HTTPException(status_code=404, detail="Case not found")
@@ -394,8 +395,9 @@ def delete_case(case_id: str, current_user: User = Depends(get_current_user)):
         db.delete(ds)
         db.commit()
         return {"message": "Deleted"}
-    finally:
-        db.close()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/results/{case_id}")
 def get_case_results(
@@ -406,9 +408,9 @@ def get_case_results(
     sentiment: str = None,
     sort_by: str = None,
     sort_order: str = "desc",
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    db = SessionLocal()
     try:
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not dataset: raise HTTPException(status_code=404, detail="Case not found")
@@ -459,6 +461,6 @@ def get_case_results(
                 "total_pages": (total - 1) // limit + 1 if total > 0 else 1
             }
         return data
-    finally:
-        db.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
    
