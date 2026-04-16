@@ -40,6 +40,42 @@ app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 app.include_router(data_upload_router, prefix="/ingest", tags=["Ingestion"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
+
+# Startup-time enforcement for SECRET_KEY
+@app.on_event("startup")
+def enforce_secret_key():
+        """Ensure a SECRET_KEY is available for JWT signing.
+
+        Behavior:
+        - If REQUIRE_SECRET_KEY is set to 'true' (case-insensitive), the server will
+            raise RuntimeError on startup when SECRET_KEY is missing. This is the
+            strict production mode.
+        - Otherwise (default), if SECRET_KEY is missing we'll generate an
+            ephemeral one for development and log a warning. Tokens signed with this
+            key will be invalidated on process restart.
+        """
+        require = os.getenv("REQUIRE_SECRET_KEY", "false").lower() == "true"
+        from backend.auth import SECRET_KEY as _secret  # refer to module-level value
+
+        if not _secret:
+                if require:
+                        # Fail early in production if a secret isn't configured
+                        logger.critical("SECRET_KEY missing and REQUIRE_SECRET_KEY=true; aborting startup.")
+                        raise RuntimeError("CRITICAL: SECRET_KEY must be set in environment before starting the server.")
+                else:
+                        # Development-friendly: generate ephemeral secret and set in module
+                        import secrets as _secrets
+                        gen = _secrets.token_urlsafe(64)
+                        try:
+                                # Mutate backend.auth.SECRET_KEY so subsequent imports use it
+                                import importlib
+                                auth_mod = importlib.import_module('backend.auth')
+                                setattr(auth_mod, 'SECRET_KEY', gen)
+                                logger.warning("No SECRET_KEY found. Generated ephemeral SECRET_KEY for development."
+                                                             " Set SECRET_KEY in .env for persistent tokens.")
+                        except Exception:
+                                logger.exception("Failed to set ephemeral SECRET_KEY on backend.auth module.")
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(

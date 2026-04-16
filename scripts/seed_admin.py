@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database.db import SessionLocal, engine, Base
 from backend.database.models import User, Organization
+from backend.database.db import engine, Base
 
 load_dotenv()
 
