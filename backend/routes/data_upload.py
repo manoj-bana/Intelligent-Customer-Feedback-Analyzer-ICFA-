@@ -182,9 +182,18 @@ async def retry_case(case_id: str, background_tasks: BackgroundTasks):
 
 # --- Image Extraction ---
 
-import google.genai as genai
-from google.genai import types
-gemini_client = genai.Client()
+# google.genai is an optional dependency (used for Gemini image extraction).
+# Import lazily and tolerate ImportError so the whole app can run without it.
+try:
+    import google.genai as genai
+    from google.genai import types
+    gemini_client = genai.Client()
+    GEMINI_AVAILABLE = True
+except Exception:
+    genai = None
+    types = None
+    gemini_client = None
+    GEMINI_AVAILABLE = False
 
 def process_image_extraction_background(case_id: str, image_path: str, content_type: str, task_type: str):
     """
@@ -194,6 +203,14 @@ def process_image_extraction_background(case_id: str, image_path: str, content_t
     try:
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not dataset: return
+
+        if not GEMINI_AVAILABLE:
+            # Mark dataset as failed due to missing optional dependency
+            db.query(Dataset).filter(Dataset.case_id == case_id).update({
+                "review_status": "Extraction Error: Gemini client not available"
+            })
+            db.commit()
+            return
 
         with open(image_path, "rb") as f:
             image_bytes = f.read()
@@ -250,6 +267,9 @@ def upload_image(
         user = db.query(User).filter(User.username == username).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        if not GEMINI_AVAILABLE:
+            raise HTTPException(status_code=503, detail="Image extraction is unavailable: optional google.genai package is not installed.")
 
         case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
         temp_image_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")

@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database.db import SessionLocal
 from backend.database.models import User, Organization
+from backend.database.db import engine, Base
 
 load_dotenv()
 
@@ -23,6 +24,9 @@ def seed_admin():
     if not admin_email or not admin_password:
         print("Error: ADMIN_EMAIL and ADMIN_PASSWORD must be set in .env")
         return
+
+    # Ensure all tables are created before seeding (safe when running script standalone)
+    Base.metadata.create_all(bind=engine)
 
     db: Session = SessionLocal()
     try:

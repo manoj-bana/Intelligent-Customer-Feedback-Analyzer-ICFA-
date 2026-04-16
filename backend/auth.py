@@ -17,7 +17,12 @@ env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 load_dotenv(env_path)
 
 router = APIRouter()
-SECRET_KEY = os.getenv("SECRET_KEY", "icfa_secret_key")
+SECRET_KEY = os.getenv("SECRET_KEY")
+# Do NOT raise here at import time. The application will enforce the presence
+# of SECRET_KEY during FastAPI startup so scripts and tests can still import
+# this module without immediately failing. See `backend.main` for the startup
+# enforcement behavior.
+
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
