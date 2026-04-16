@@ -29,7 +29,8 @@ def get_all_users(current_user: User = Depends(get_current_user)):
                     "username": u.username,
                     "email": u.email,
                     "role": u.role,
-                    "is_active": u.is_active
+                    "is_active": u.is_active,
+                    "organization": u.organization.name if u.organization else "Unassigned"
                 } for u in users
             ]
         }
@@ -242,7 +243,7 @@ def clear_all_notifications(current_user: User = Depends(get_current_user)):
 # --- Unified Admin Configuration APIs ---
 
 class UnifiedConfigUpdate(BaseModel):
-    # Sentiment
+    org_id: Optional[int] = None 
     pos_threshold: Optional[float] = None
     neg_threshold: Optional[float] = None
     pos_label: Optional[str] = None
@@ -253,6 +254,7 @@ class UnifiedConfigUpdate(BaseModel):
     # Churn
     high_risk_threshold: Optional[float] = None
     medium_risk_threshold: Optional[float] = None
+    low_risk_threshold: Optional[float] = None
     churn_rules: Optional[dict] = None
     
     # Mapping 
@@ -260,15 +262,20 @@ class UnifiedConfigUpdate(BaseModel):
 
 @router.get("/config/get")
 @router.get("/get-config") 
-def get_unified_config(current_user: User = Depends(get_current_user)):
-    """Fetch complete multi-tenant config JSON."""
+def get_unified_config(org_id: Optional[int] = Query(None), current_user: User = Depends(get_current_user)):
+    """Fetch complete config JSON for a specific organization or global default."""
     db = SessionLocal()
     try:
-        config = db.query(CompanyConfig).filter(CompanyConfig.org_id == current_user.org_id).first()
+        # If admin provides org_id, use it. Else use their own.
+        target_org_id = org_id if current_user.role == "admin" else current_user.org_id
+        
+        config = db.query(CompanyConfig).filter(CompanyConfig.org_id == target_org_id).first()
         if not config:
             return {
                 "pos_threshold": 0.05, "neg_threshold": -0.05,
-                "high_risk_threshold": 0.70, "medium_risk_threshold": 0.40
+                "high_risk_threshold": 0.70, "medium_risk_threshold": 0.40,
+                "low_risk_threshold": 0.10,
+                "org_id": target_org_id
             }
         return config
     finally:
@@ -280,17 +287,21 @@ def update_unified_config(data: UnifiedConfigUpdate, current_user: User = Depend
     verify_admin(current_user)
     db = SessionLocal()
     try:
-        config = db.query(CompanyConfig).filter(CompanyConfig.org_id == current_user.org_id).first()
+        target_org_id = data.org_id
+        
+        config = db.query(CompanyConfig).filter(CompanyConfig.org_id == target_org_id).first()
         if not config:
-            config = CompanyConfig(org_id=current_user.org_id)
+            config = CompanyConfig(org_id=target_org_id)
             db.add(config)
         
-        # Update fields if present
-        for field, value in data.dict(exclude_unset=True).items():
+        update_data = data.dict(exclude_unset=True)
+        if "org_id" in update_data: del update_data["org_id"]
+        
+        for field, value in update_data.items():
             setattr(config, field, value)
             
         db.commit()
-        return {"message": "Configuration saved successfully "}
+        return {"message": "Configuration saved successfully"}
     finally:
         db.close()
 
@@ -302,14 +313,22 @@ class OrgCreate(BaseModel):
 
 @router.post("/organizations")
 def create_organization(data: OrgCreate, current_user: User = Depends(get_current_user)):
-    """Create a new organization (Super Admin only)."""
-    # Requires a super_admin role for multi-tenant setup
-    if current_user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Super Admin access required")
+    """Create a new organization (Admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
     
     db = SessionLocal()
     try:
-        new_org = Organization(name=data.name, slug=data.slug)
+        # Check for existing name or slug
+        existing_name = db.query(Organization).filter(Organization.name == data.name).first()
+        if existing_name:
+            raise HTTPException(status_code=400, detail=f"Company name '{data.name}' already exists.")
+            
+        existing_slug = db.query(Organization).filter(Organization.slug == data.slug.lower().strip()).first()
+        if existing_slug:
+            raise HTTPException(status_code=400, detail=f"Company code (slug) '{data.slug}' is already taken.")
+
+        new_org = Organization(name=data.name, slug=data.slug.lower().strip())
         db.add(new_org)
         db.commit()
         db.refresh(new_org)
@@ -319,11 +338,28 @@ def create_organization(data: OrgCreate, current_user: User = Depends(get_curren
 
 @router.get("/organizations")
 def list_organizations(current_user: User = Depends(get_current_user)):
-    """List all organizations (Super Admin only)."""
-    if current_user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Super Admin access required")
+    """List all organizations (Admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
     db = SessionLocal()
     try:
         return db.query(Organization).all()
+    finally:
+        db.close()
+
+@router.get("/check-availability")
+def check_org_availability(name: str = None, slug: str = None, current_user: User = Depends(get_current_user)):
+    """Check if an organization name or slug is available."""
+    if current_user.role != "admin":
+         raise HTTPException(status_code=403, detail="Admin access required")
+    db = SessionLocal()
+    try:
+        if name:
+            exists = db.query(Organization).filter(Organization.name.ilike(name.strip())).first() is not None
+            return {"exists": exists}
+        if slug:
+            exists = db.query(Organization).filter(Organization.slug == slug.lower().strip()).first() is not None
+            return {"exists": exists}
+        return {"exists": False}
     finally:
         db.close()

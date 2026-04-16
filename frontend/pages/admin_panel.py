@@ -12,7 +12,7 @@ def get_headers():
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 def show():
-    st.title("👑 Administrative Control Hub")
+    st.title("📊 Administration Hub")
     st.markdown("Global system oversight and management.")
 
     tab_stats, tab_users, tab_datasets, tab_notify, tab_config = st.tabs([
@@ -66,29 +66,33 @@ def render_users():
             
             for i, user in df.iterrows():
                 with st.container(border=True):
-                    c1, c2, c3 = st.columns([3, 2, 2])
-                    c1.markdown(f"**{user['username']}** ({user['email']})")
-                    c1.caption(f"Role: {user['role'].upper()} | Status: {'Active' if user['is_active'] else 'Deactivated'}")
+                    c1, c2, c3, c4 = st.columns([2, 2, 1.5, 1.5])
                     
-                    with c2:
+                    # Column 1: Identifying Info
+                    c1.markdown(f"**{user['username']}**")
+                    c1.caption(f"{user['email']}")
+                    
+                    # Column 2: Organization (The Requested Column)
+                    c2.markdown("**Organisation**")
+                    c2.info(user.get('organization', 'Individual'))
+                    
+                    with c3:
                         if user['role'] != 'admin':
-                            if st.button("Promote to Admin", key=f"promo_{user['id']}"):
+                            if st.button("⬆️ Promote", key=f"promo_{user['id']}", use_container_width=True):
                                 requests.put(f"{API_URL}/admin/users/{user['id']}/role", params={"new_role": "admin"}, headers=get_headers())
                                 st.rerun()
                         else:
-                            if st.button("Demote to User", key=f"demo_{user['id']}"):
+                            if st.button("⬇️ Demote", key=f"demo_{user['id']}", use_container_width=True):
                                 requests.put(f"{API_URL}/admin/users/{user['id']}/role", params={"new_role": "user"}, headers=get_headers())
                                 st.rerun()
                     
-                    with c3:
+                    with c4:
                         if user['is_active']:
-                            if st.button("Deactivate", key=f"deact_{user['id']}", type="secondary"):
-                                # Assume deactivation is a soft delete or role change if needed, 
-                                # but based on plan we have a delete endpoint.
+                            if st.button("🚫 Deactivate", key=f"deact_{user['id']}", type="secondary", use_container_width=True):
                                 requests.delete(f"{API_URL}/admin/users/{user['id']}", headers=get_headers())
                                 st.rerun()
                         else:
-                            st.button("Hard Delete", key=f"hdel_{user['id']}", type="primary")
+                            st.warning("Deactivated")
         else:
             st.error("Could not load users.")
     except Exception as e:

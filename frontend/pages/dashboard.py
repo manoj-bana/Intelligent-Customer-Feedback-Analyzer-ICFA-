@@ -152,10 +152,11 @@ def show():
 
     # Collapsible System Options (Admin Only)
     if role == "admin":
-        with st.sidebar.expander("👑 Admin Control", expanded=(query_page in ["👑 Admin Panel", "👥 Manage Users"])):
-            nav_link("👑 Panel", "👑 Admin Panel", query_page)
-            nav_link("⚙️ Settings", "⚙️ Admin Settings", query_page)
-            nav_link("👥 Users", "👥 Manage Users", query_page)
+        with st.sidebar.expander("⚙️ Administration", expanded=(query_page in ["📊 System Panel", "⚙️ Admin Settings", "👥 Manage Users", "🏢 Organization Control"])):
+            nav_link("📊 System Panel", "👑 Admin Panel", query_page)
+            nav_link("🏢 Organizations", "🏢 Organization Control", query_page)
+            nav_link("⚙️ System Settings", "⚙️ Admin Settings", query_page)
+            nav_link("👥 User Directory", "👥 Manage Users", query_page)
 
     # Settings at Bottom
     st.sidebar.markdown("<div style='height: 1vh;'></div>", unsafe_allow_html=True)
@@ -273,6 +274,9 @@ def show():
         st.info("Check back soon for advanced real-time alerts. Use the bell icon at the top right for now.")
     elif query_page == "👑 Admin Panel":
         admin_panel.show()
+    elif query_page == "🏢 Organization Control":
+        from frontend.pages import admin_orgs
+        admin_orgs.show()
     elif query_page == "⚙️ Admin Settings":
         from frontend.pages import admin_settings
         admin_settings.show()
@@ -701,8 +705,22 @@ def show_manage_users():
         
         # Display as a clean table
         df_users = pd.DataFrame(users)
-        df_users["status"] = df_users["is_active"].apply(lambda x: "✅ Active" if x == 1 else "❌ Deactivated")
-        st.dataframe(df_users[["id", "username", "email", "role", "status"]], use_container_width=True, hide_index=True)
+        df_users["Status"] = df_users["is_active"].apply(lambda x: "✅ Active" if x == 1 else "❌ Deactivated")
+        
+        # Rename columns for display
+        df_display = df_users.rename(columns={
+            "id": "ID",
+            "username": "Username",
+            "email": "Email",
+            "role": "Role",
+            "organization": "Organisation"
+        })
+
+        st.dataframe(
+            df_display[["ID", "Username", "Email", "Organisation", "Role", "Status"]], 
+            use_container_width=True, 
+            hide_index=True
+        )
         
         st.divider()
         st.subheader("🛡️ Revoke Admin Privileges")

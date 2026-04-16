@@ -35,7 +35,12 @@ def seed_admin():
         # Check if username 'admin' is taken
         user_with_admin_name = db.query(User).filter(User.username == "admin").first()
         if user_with_admin_name:
-            print("Username 'admin' is already taken by a non-admin user. Please resolve manually.")
+            print(f"Found existing user '{user_with_admin_name.username}'. Promoting to Admin role...")
+            user_with_admin_name.role = "admin"
+            user_with_admin_name.email = admin_email
+            user_with_admin_name.password = hash_password(admin_password)
+            db.commit()
+            print("Successfully promoted existing 'admin' user to Admin role.")
             return
 
         # Create Default Organization if none exists

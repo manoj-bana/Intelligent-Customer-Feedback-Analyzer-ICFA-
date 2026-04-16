@@ -56,6 +56,10 @@ def _run_migrations():
             ("is_active", "ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"),
             ("role",      "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'"),
             ("org_id",    "ALTER TABLE users ADD COLUMN org_id INTEGER"),
+            ("security_question", "ALTER TABLE users ADD COLUMN security_question TEXT"),
+            ("security_answer_hash", "ALTER TABLE users ADD COLUMN security_answer_hash TEXT"),
+            ("reset_token", "ALTER TABLE users ADD COLUMN reset_token TEXT"),
+            ("reset_token_expiry", "ALTER TABLE users ADD COLUMN reset_token_expiry TEXT"),
         ]
         for col, sql in user_migrations:
             if col not in user_cols:
@@ -71,11 +75,26 @@ def _run_migrations():
             ("result_data",   "ALTER TABLE datasets ADD COLUMN result_data TEXT"),
             ("error_message", "ALTER TABLE datasets ADD COLUMN error_message TEXT"),
             ("last_analyzed", "ALTER TABLE datasets ADD COLUMN last_analyzed TEXT"),
+            ("notification_seen", "ALTER TABLE datasets ADD COLUMN notification_seen INTEGER DEFAULT 0"),
+            ("source", "ALTER TABLE datasets ADD COLUMN source TEXT DEFAULT 'web'"),
+            ("extraction_status", "ALTER TABLE datasets ADD COLUMN extraction_status TEXT DEFAULT '1 of 1'"),
         ]
         for col, sql in ds_migrations:
             if col not in ds_cols:
                 cursor.execute(sql)
                 print(f"[DB] Migration: added '{col}' to datasets.")
+
+        # 3. CompanyConfigs table migrations
+        cursor.execute("PRAGMA table_info(company_configs)")
+        cfg_cols = {row[1] for row in cursor.fetchall()}
+        
+        cfg_migrations = [
+            ("low_risk_threshold", "ALTER TABLE company_configs ADD COLUMN low_risk_threshold FLOAT DEFAULT 0.10"),
+        ]
+        for col, sql in cfg_migrations:
+            if col not in cfg_cols:
+                cursor.execute(sql)
+                print(f"[DB] Migration: added '{col}' to company_configs.")
 
         # Ensure no users are locked out
         cursor.execute("UPDATE users SET is_active = 1 WHERE is_active IS NULL")
