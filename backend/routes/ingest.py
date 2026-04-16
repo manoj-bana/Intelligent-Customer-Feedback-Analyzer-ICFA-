@@ -59,10 +59,9 @@ async def upload_file(
         raise HTTPException(status_code=400, detail="Invalid file type. Only CSV/Excel allowed.")
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.username == username).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
+        # Use current_user directly instead of looking up by form-sent username
+        user = current_user
+        
         # --- Upsert logic: Update existing record if found, else create new ---
         existing = db.query(Dataset).filter(
             Dataset.user_id == user.id,
@@ -81,7 +80,6 @@ async def upload_file(
                     )
                 )
             
-            # If completed/failed, we RE-USE the existing record (Upsert)
             case_id = existing.case_id
             dataset = existing
             dataset.review_status = "pending"
@@ -89,11 +87,8 @@ async def upload_file(
             dataset.result_data = None
             dataset.error_message = None
             dataset.created_at = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Use existing file path but we will overwrite the file
             file_path = dataset.file_path
         else:
-            # Create a brand new record
             case_id = str(uuid.uuid4())[:8]
             file_name = f"{case_id}_{file.filename}"
             file_path = os.path.join(UPLOAD_DIR, file_name)
@@ -101,7 +96,7 @@ async def upload_file(
             dataset = Dataset(
                 case_id=case_id,
                 user_id=user.id,
-                org_id=user.org_id,
+                org_id=user.org_id, # This correctly handles None for individuals
                 filename=file.filename,
                 file_path=file_path,
                 task_type=task_type,
@@ -567,29 +562,41 @@ def mark_notification_read(notif_id: int):
 # ---------------------------------------------------------------------------
 
 @router.delete("/cases/all/{username}")
-def delete_all_cases(username: str):
+def delete_all_cases(username: str, current_user: User = Depends(get_current_user)):
     """
-    Delete all cases and associated files for a user.
+    Delete all cases and associated files for the logged-in user.
     """
+    if current_user.username != username and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
-        if not user:
-            user = db.query(User).filter(User.username.ilike(username)).first()
-            
         if not user: raise HTTPException(status_code=404, detail="User not found")
-        datasets = db.query(Dataset).filter(Dataset.user_id == user.id).all()
+        
+        # Use current_user.id directly for reliable filtering
+        datasets = db.query(Dataset).filter(Dataset.user_id == current_user.id).all()
         for ds in datasets:
             try:
-                if os.path.exists(ds.file_path): os.remove(ds.file_path)
+                # Cleanup physical files
+                if ds.file_path and os.path.exists(ds.file_path): 
+                    os.remove(ds.file_path)
+                
+                # Cleanup associated result files
                 res_p = f"{ds.file_path}_results.json"
                 if os.path.exists(res_p): os.remove(res_p)
-                enr_p = ds.file_path.replace(ds.case_id, f"enriched_{ds.case_id}")
-                if os.path.exists(enr_p): os.remove(enr_p)
-            except: pass
+                
+                # Cleanup enriched files
+                if ds.case_id:
+                    enr_p = ds.file_path.replace(ds.case_id, f"enriched_{ds.case_id}")
+                    if os.path.exists(enr_p): os.remove(enr_p)
+            except Exception as e:
+                print(f"File cleanup error for {ds.case_id}: {e}")
+            
             db.delete(ds)
+        
         db.commit()
-        return {"message": "All cases deleted"}
+        return {"message": f"Successfully deleted {len(datasets)} cases"}
     finally:
         db.close()
 

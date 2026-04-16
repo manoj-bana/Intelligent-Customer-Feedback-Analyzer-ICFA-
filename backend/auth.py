@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
+from typing import Optional
 from jose import jwt
 import datetime
 import re
@@ -22,7 +23,10 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+from sqlalchemy.orm import Session
+from backend.database.db import get_db
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Dependency to get the current authenticated user from JWT."""
     credentials_exception = HTTPException(
         status_code=401,
@@ -37,30 +41,22 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except Exception:
         raise credentials_exception
 
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == username).first()
-        if user is None:
-            raise credentials_exception
-        if user.is_active == 0:
-            raise HTTPException(status_code=403, detail="Account deactivated")
-        return user
-    finally:
-        db.close()
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        raise credentials_exception
+    if user.is_active == 0:
+        raise HTTPException(status_code=403, detail="Account deactivated")
+    return user
 
-def get_current_org(current_user: User = Depends(get_current_user)):
+def get_current_org(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Dependency to get the organization associated with the current user."""
     if not current_user.org_id:
         raise HTTPException(status_code=403, detail="User is not associated with any organization")
     
-    db = SessionLocal()
-    try:
-        org = db.query(Organization).filter(Organization.id == current_user.org_id).first()
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found")
-        return org
-    finally:
-        db.close()
+    org = db.query(Organization).filter(Organization.id == current_user.org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return org
 
 def hash_password(password: str) -> str:
     """Securely hash a password using bcrypt."""
@@ -100,6 +96,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
+    org_name: Optional[str] = None # Optional organization name
     security_question: str
     security_answer: str
 
@@ -139,6 +136,18 @@ def check_email(email: str = Query(...)):
         email_normalized = email.lower()
         user = db.query(User).filter(User.email == email_normalized).first()
         exists = user is not None
+        return {"exists": exists}
+    finally:
+        db.close()
+
+@router.get("/check-org-name")
+def check_org_name(name: str = Query(...)):
+    """Validates if a company name exists."""
+    db = SessionLocal()
+    try:
+        name_normalized = name.strip()
+        org = db.query(Organization).filter(Organization.name.ilike(name_normalized)).first()
+        exists = org is not None
         return {"exists": exists}
     finally:
         db.close()
@@ -211,10 +220,19 @@ def register(data: RegisterRequest):
         if db.query(User).filter(User.email == data.email.lower()).first():
             raise HTTPException(status_code=400, detail="Email already registered")
 
+        # --- Optional Organization Linking via Name ---
+        org_id = None
+        if data.org_name and data.org_name.strip():
+            org = db.query(Organization).filter(Organization.name.ilike(data.org_name.strip())).first()
+            if not org:
+                raise HTTPException(status_code=400, detail=f"The organization '{data.org_name}' was not found. Please check the name or leave it blank.")
+            org_id = org.id
+
         new_user = User(
             username=data.username,
             email=data.email.lower(),
             password=hash_password(data.password),
+            org_id=org_id, # Link only if found
             security_question=data.security_question,
             security_answer_hash=hash_answer(data.security_answer)
         )
@@ -445,7 +463,8 @@ def get_all_users(admin_username: str = Query(...)):
                 "username": u.username, 
                 "email": u.email, 
                 "role": u.role,
-                "is_active": u.is_active
+                "is_active": u.is_active,
+                "organization": u.organization.name if u.organization else "Individual"
             } for u in users
         ]}
     finally:

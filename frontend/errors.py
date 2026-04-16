@@ -17,7 +17,11 @@ ERROR_MESSAGES = {
     "WRONG_OLD_PASSWORD": "Current password is incorrect",
     "OLD_PASSWORD_CORRECT": "Password is correct",
     "OLD_PASSWORD_INVALID": "Password is invalid",
-    "SAME_PASSWORD_ERROR": "New password cannot be the same as the current password"
+    "SAME_PASSWORD_ERROR": "New password cannot be the same as the current password",
+    "ORG_NOT_FOUND": "Invalid Company Code. Please check with your admin.",
+    "ORG_FOUND": "Company found: ",
+    "ORG_NAME_TAKEN": "Company name already exists.",
+    "ORG_SLUG_TAKEN": "Company code (slug) is already taken."
 }
 
 

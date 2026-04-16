@@ -21,9 +21,9 @@ class Organization(Base):
     )
     
     # Relationships
-    users = relationship("User", back_populates="organization")
-    datasets = relationship("Dataset", back_populates="organization")
-    config = relationship("CompanyConfig", back_populates="organization", uselist=False)
+    users = relationship("User", back_populates="organization", cascade="all, delete-orphan")
+    datasets = relationship("Dataset", back_populates="organization", cascade="all, delete-orphan")
+    config = relationship("CompanyConfig", back_populates="organization", uselist=False, cascade="all, delete-orphan")
 
 class User(Base):
     """

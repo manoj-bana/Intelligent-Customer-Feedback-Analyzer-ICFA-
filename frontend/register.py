@@ -134,6 +134,31 @@ def show():
                     unsafe_allow_html=True
                 )
 
+        # Optional Organization Name
+        org_name = st.text_input("Organization (Optional)", key="reg_org", placeholder="Enter your company name or leave blank")
+        if org_name:
+            try:
+                # Reuse the availability checker from the admin route (or auth)
+                # Since auth/check-org-slug was slug based, I'll update it or the frontend call.
+                # Actually, I added check-org-slug to auth.py earlier. I'll make it check name too.
+                resp = requests.get(f"{API_URL}/auth/check-org-name?name={org_name}", timeout=2)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("exists"):
+                        st.markdown(
+                            f'<p class="inline-msg check-valid">✓ You will join: <b>{org_name}</b></p>', 
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.markdown(
+                            f'<p class="inline-msg check-invalid">⚠ Organization not found. Check the name or leave it blank.</p>', 
+                            unsafe_allow_html=True
+                        )
+            except Exception:
+                pass
+        else:
+            st.caption("💡 Leave this blank if you are a regular user.")
+
         security_questions = [
             "What was your first pet's name?",
             "What is your mother's maiden name?", 
@@ -174,6 +199,7 @@ def show():
                                 "username": username,
                                 "email": email,
                                 "password": password,
+                                "org_name": org_name, # Send the Name
                                 "security_question": question,
                                 "security_answer": answer
                             },
