@@ -171,7 +171,14 @@ def show():
     st.markdown("""
         <style>
         /* Hide Streamlit Password Eye Icon Fix */
-        [data-testid="stTextInput"] [data-testid="styled-input-container"] button { display: none !important; }
+        [data-testid="stTextInput"] [data-testid="styled-input-container"] button {
+            display: none !important;
+        }
+        input[type="password"]::-ms-reveal,
+        input[type="password"]::-ms-clear,
+        input[type="password"]::-webkit-credentials-auto-fill-button {
+            display: none !important;
+        }
         .checklist-item { font-size: 0.85rem; margin-bottom: 2px; }
         .check-valid { color: #059669; }
         .check-invalid { color: #dc2626; }

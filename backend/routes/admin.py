@@ -347,6 +347,32 @@ def list_organizations(current_user: User = Depends(get_current_user)):
     finally:
         db.close()
 
+@router.delete("/organizations/{org_id}")
+def delete_organization(org_id: int = Path(...), current_user: User = Depends(get_current_user)):
+    """Hard delete an organization and all associated data (Admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        
+        # Clean up physical files for all datasets in this org
+        for dataset in org.datasets:
+            try:
+                if os.path.exists(dataset.file_path):
+                    os.remove(dataset.file_path)
+            except Exception as e:
+                print(f"Warning: Could not delete file {dataset.file_path}: {e}")
+
+        db.delete(org)
+        db.commit()
+        return {"message": f"Organization '{org.name}' and all associated data deleted successfully"}
+    finally:
+        db.close()
+
 @router.get("/check-availability")
 def check_org_availability(name: str = None, slug: str = None, current_user: User = Depends(get_current_user)):
     """Check if an organization name or slug is available."""

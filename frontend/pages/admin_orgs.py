@@ -77,6 +77,44 @@ def show():
 
     st.divider()
 
+    # Section: Manage / Delete Organization
+    st.subheader("🗑️ Manage / Delete Organization")
+    try:
+        res = requests.get(f"{API_URL}/admin/organizations", headers=get_headers())
+        if res.status_code == 200:
+            orgs = res.json()
+            if orgs:
+                org_map = {f"🏢 {o['name']} ({o['slug']})": o['id'] for o in orgs}
+                selected_label = st.selectbox("Select Organization to Remove", ["-- Select --"] + list(org_map.keys()), key="man_del_org_sel")
+                
+                if selected_label != "-- Select --":
+                    selected_id = org_map[selected_label]
+                    if st.button("🚨 Delete Selected Organization", type="secondary"):
+                        st.session_state[f"confirm_delete_org_{selected_id}"] = True
+                    
+                    if st.session_state.get(f"confirm_delete_org_{selected_id}"):
+                        st.error(f"⚠️ **DANGER:** Deleting this organization will wipe all its users and datasets. This cannot be undone.")
+                        c1, c2 = st.columns(2)
+                        if c1.button("🔥 Yes, Delete", key=f"yes_del_{selected_id}", type="primary", use_container_width=True):
+                            del_res = requests.delete(f"{API_URL}/admin/organizations/{selected_id}", headers=get_headers())
+                            if del_res.status_code == 200:
+                                st.success("Organization deleted.")
+                                del st.session_state[f"confirm_delete_org_{selected_id}"]
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete.")
+                        if c2.button("❌ Cancel", key=f"no_del_{selected_id}", use_container_width=True):
+                            del st.session_state[f"confirm_delete_org_{selected_id}"]
+                            st.rerun()
+            else:
+                st.info("No organizations available to manage.")
+        else:
+            st.error("Could not load organizations for dismissal.")
+    except Exception as e:
+        st.error(f"Error loading management tools: {e}")
+
+    st.divider()
+
     # Section: List Existing Organizations
     st.subheader("📋 Registered Organizations")
     try:

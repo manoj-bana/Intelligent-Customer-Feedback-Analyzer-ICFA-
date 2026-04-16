@@ -98,6 +98,9 @@ def render_users():
     except Exception as e:
         st.error(f"Error: {e}")
 
+    except Exception as e:
+        st.error(f"Error: {e}")
+
 def render_datasets():
     st.subheader("📁 System-Wide Datasets")
     try:
