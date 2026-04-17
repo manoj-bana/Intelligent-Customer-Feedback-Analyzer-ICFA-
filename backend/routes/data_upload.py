@@ -131,6 +131,18 @@ def process_data_pipeline(case_id: str, file_path: str, task_type: str):
         elif task_type == "Churn Prediction":
             churn_res = predict_churn(df_mapped, config=config)
             
+            # If churn service returned an error (model missing, schema issues),
+            # mark the dataset as failed and record the error so the frontend
+            # shows a useful message instead of misleading zeros.
+            if isinstance(churn_res, dict) and churn_res.get("error"):
+                err_msg = churn_res.get("error")
+                # Persist failure state and message
+                dataset.review_status = "failed"
+                dataset.error_message = err_msg if isinstance(err_msg, str) else str(err_msg)
+                db.commit()
+                print(f"[CHURN PIPELINE] Failed: {err_msg}")
+                return
+
             # predictions come from service
             predictions = churn_res.get("predictions", [])
             
