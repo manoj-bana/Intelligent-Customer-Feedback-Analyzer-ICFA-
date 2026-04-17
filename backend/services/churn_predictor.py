@@ -30,21 +30,48 @@ def predict_churn(df: pd.DataFrame, config: Any = None) -> Dict[str, Any]:
     
     # 2. Preprocessing & Feature Alignment
     features = df.copy()
-    
-    # Map from ICFA Standard Schema if present
-    if "num_feature_0" in features.columns:
+
+    # Flexible column detection: try to detect common churn dataset column names
+    # Normalize column names to help matching (case-insensitive, strip spaces)
+    col_map = {c.lower().replace(' ', '').replace('_',''): c for c in features.columns}
+
+    def find_and_assign(target_keys, target_name, cast_numeric=True):
+        """Find a column matching any of the target_keys and assign to target_name."""
+        for k in target_keys:
+            if k in col_map:
+                orig = col_map[k]
+                if cast_numeric:
+                    features[target_name] = pd.to_numeric(features[orig], errors="coerce").fillna(0)
+                else:
+                    features[target_name] = features[orig]
+                return True
+        return False
+
+    # Common keys for mapping
+    tenure_keys = ["tenure", "months", "tenuremonths", "contractlength"]
+    monthly_keys = ["monthlycharges", "monthlycharge", "monthly_charges", "monthlychargeamount", "monthly_charge"]
+    total_keys = ["totalcharges", "total_charge", "total_chargeamount", "total"]
+
+    mapped_tenure = find_and_assign(tenure_keys, "tenure", cast_numeric=True)
+    mapped_monthly = find_and_assign(monthly_keys, "MonthlyCharges", cast_numeric=True)
+    mapped_total = find_and_assign(total_keys, "TotalCharges", cast_numeric=True)
+
+    # Also support the ICFA-standard num_feature_x columns
+    if not mapped_tenure and "num_feature_0" in features.columns:
         features["tenure"] = pd.to_numeric(features["num_feature_0"], errors="coerce").fillna(0)
-    if "num_feature_1" in features.columns:
+        mapped_tenure = True
+    if not mapped_monthly and "num_feature_1" in features.columns:
         features["MonthlyCharges"] = pd.to_numeric(features["num_feature_1"], errors="coerce").fillna(0)
-    
-    # TotalCharges: Use existing if present, otherwise calculate
-    if "TotalCharges" not in features.columns:
-        if "num_feature_0" in features.columns and "num_feature_1" in features.columns:
-             features["TotalCharges"] = features["tenure"] * features["MonthlyCharges"]
+        mapped_monthly = True
+
+    # If TotalCharges not present, try to compute from tenure*MonthlyCharges when possible
+    if not mapped_total:
+        if mapped_tenure and mapped_monthly:
+            features["TotalCharges"] = features["tenure"] * features["MonthlyCharges"]
+            mapped_total = True
         else:
-             features["TotalCharges"] = 0
-    else:
-        features["TotalCharges"] = pd.to_numeric(features["TotalCharges"], errors="coerce").fillna(0)
+            # default to zeros if not computable
+            features["TotalCharges"] = 0
 
     # Required numeric features
     numeric_features = ["tenure", "MonthlyCharges", "TotalCharges"]
@@ -54,6 +81,10 @@ def predict_churn(df: pd.DataFrame, config: Any = None) -> Dict[str, Any]:
     
     # Collect all available features
     available = [f for f in numeric_features + categorical_features if f in features.columns]
+    if not available:
+        # No usable features found — return an informative error
+        return {"error": "No usable numeric or categorical features detected for churn prediction. Please ensure your file has tenure, MonthlyCharges, TotalCharges or equivalent columns.", "hints": ["Column names detected: %s" % ", ".join(list(df.columns)[:20])]}
+
     X_input = features[available]
     
     # One-hot encode to match training process
