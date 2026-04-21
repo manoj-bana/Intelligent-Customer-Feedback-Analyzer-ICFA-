@@ -1,45 +1,43 @@
 import re
 import os
 import joblib
+import nltk
 from collections import Counter
 from typing import List, Dict, Any, Tuple
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
 
-# Common English stop words (Comprehensive set)
-_ENGLISH_STOP_WORDS = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", 
-    "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", 
-    "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", 
-    "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", 
-    "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", 
-    "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", 
-    "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", 
-    "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", 
-    "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", 
-    "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", 
-    "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", 
-    "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", 
-    "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", 
-    "yourself", "yourselves", "than", "then", "thus", "onto", "upon", "into"
-}
+# --- Standard NLTK Resources ---
+try:
+    from nltk.corpus import stopwords
+    from nltk.stem import WordNetLemmatizer
+    _STOP_WORDS = set(stopwords.words('english'))
+    _lemmatizer = WordNetLemmatizer()
+except Exception:
+    # Minimal fallback only if NLTK is somehow broken
+    _STOP_WORDS = {"a", "the", "is", "in", "it", "to", "and", "or"}
+    _lemmatizer = None
 
-# Domain-specific and noise words to exclude from keyword extraction
-STOP_WORDS = {
-    "product", "products", "item", "items", "thing", "things",
-    "good", "great", "nice", "fine", "okay", "also", "well", "just", 
-    "really", "very", "much", "way", "even", "still", "first", "last", 
-    "little", "lot", "many", "every", "make", "made", "work", "works", "working",
-    "back", "give", "given", "come", "came", "look", "looks", "using", "used", "use",
-    "feel", "felt", "put", "take", "run", "keep", "went", "day", "days", "time", 
-    "never", "always", "since", "now", "can", "will", "need", "want", "know", "think", 
-    "may", "bit", "br", "http", "https", "www", "com", "href", "src", "like", "love",
-    "really", "quite", "actually", "probably", "possibly", "usually", "often", "always",
-    "someone", "something", "anybody", "anything", "some", "many", "most", "each", "every"
+DOMAIN_STOP_WORDS = {
+    # Generic sentiment words (Noise for topic analysis)
+    "good", "great", "best", "excellent", "amazing", "love", "like", "wonderful", "perfect",
+    "bad", "terrible", "awful", "worst", "horrible", "okay", "fine", "nice", "better",
+    # Filler and high-frequency noise
+    "one", "would", "get", "got", "really", "also", "even", "still", "much", "many",
+    "thing", "things", "way", "could", "should", "want", "know", "think", "br",
+    # Technical/Domain noise
+    "product", "products", "item", "items", "http", "https", "www", "com", "href", "src",
+    "using", "used", "use", "make", "made", "work", "works", "working"
 }
+_STOP_WORDS |= DOMAIN_STOP_WORDS
+
+def _get_nltk_resources():
+    return _STOP_WORDS, _lemmatizer
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 _sia = SentimentIntensityAnalyzer()
-_STOP_WORDS = {w.lower() for w in (_ENGLISH_STOP_WORDS | STOP_WORDS)}
+# (Redundant line removed here)
 
 # --- Supervised Model Globals ---
 _sentiment_model = None
@@ -79,7 +77,7 @@ def _clean_text_for_keywords(text: str) -> str:
 def clean_text_v2(text: str) -> str:
     """
     Enhanced cleaning pipeline for supervised training.
-    Removes HTML, URLs, punctuation, and filters stop words.
+    Includes: HTML/URL removal, Negation handling, Lemmatization, and Stopword filtering.
     """
     try:
         if not text or not isinstance(text, str):
@@ -89,12 +87,38 @@ def clean_text_v2(text: str) -> str:
         cleaned = re.sub(r'<[^>]+>', ' ', text)
         cleaned = re.sub(r'https?://\S+|www\.\S+', ' ', cleaned)
         
-        # 2. Noise & Number removal
-        cleaned = re.sub(r'[^a-zA-Z\s]', ' ', cleaned).lower()
+        # 2. Noise & Number removal (Preserve '!' for sentiment hint)
+        cleaned = re.sub(r'[^a-zA-Z\s!]', ' ', cleaned).lower()
         
-        # 3. Word-level filtering (Stop words + Short words)
+        # 3. Negation Handling (e.g., "not happy" -> "not_happy")
+        negations = {"not", "no", "never", "n't", "cannot", "without", "hardly", "seldom"}
         words = cleaned.split()
-        filtered = [w for w in words if w not in _STOP_WORDS and len(w) > 2]
+        transformed = []
+        skip_next = False
+        
+        for i in range(len(words)):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            if words[i] in negations and i + 1 < len(words):
+                # Attach negation to next word
+                transformed.append(f"{words[i]}_{words[i+1]}")
+                skip_next = True
+            else:
+                transformed.append(words[i])
+        
+        # 4. Lemmatization & Stopword filtering
+        filtered = []
+        for w in transformed:
+            if _lemmatizer:
+                lemma = _lemmatizer.lemmatize(w)
+            else:
+                lemma = w
+                
+            # Filter stopwords
+            if "_" in lemma or (lemma not in _STOP_WORDS and len(lemma) > 1) or lemma == "!":
+                filtered.append(lemma)
         
         return " ".join(filtered)
     except Exception:
@@ -169,14 +193,22 @@ def extract_keywords_frequency(texts: list, top_n: int = 15) -> list:
     
     for text in texts:
         cleaned = _clean_text_for_keywords(text)
-        words = re.findall(r'\b[a-zA-Z]{4,}\b', cleaned)
+        # Updated regex to allow shorter words (2+ letters)
+        words = re.findall(r'\b[a-zA-Z]{2,}\b', cleaned)
         all_words.extend([w.strip() for w in words if w.strip() not in stop_words])
         
     counter = Counter(all_words)
-    return [
-        {"word": w, "count": c, "method": "frequency"} 
-        for w, c in counter.most_common(top_n)
-    ]
+    results = []
+    sia = SentimentIntensityAnalyzer() # Use VADER for individual word weighting
+    
+    for word, count in counter.most_common(top_n * 2): # Look at more candidates
+        # Calculate sentiment weight: |compound| + 1.0 (multiplier)
+        s_score = abs(sia.polarity_scores(word)["compound"])
+        weighted_score = count * (1.0 + s_score * 2.0) # Boost polar words by up to 3x
+        results.append({"word": word, "count": count, "score": round(weighted_score, 2), "method": "frequency_weighted"})
+    
+    # Sort by weighted score and return top_n
+    return sorted(results, key=lambda x: x["score"], reverse=True)[:top_n]
 
 def extract_keywords_tfidf(texts: list, top_n: int = 15) -> list:
     """
@@ -196,7 +228,7 @@ def extract_keywords_tfidf(texts: list, top_n: int = 15) -> list:
         vectorizer = TfidfVectorizer(
             stop_words=list(stop_words_list), 
             max_features=1000, 
-            token_pattern=r'\b[a-zA-Z]{4,}\b', 
+            token_pattern=r'\b[a-zA-Z]{2,}\b', 
             min_df=2, 
             max_df=0.85
         )
@@ -226,16 +258,15 @@ def extract_keywords_tfidf(texts: list, top_n: int = 15) -> list:
 def batch_analyze_sentiment(texts: List[str], config=None) -> List[Dict[str, Any]]:
     """
     Optimized batch sentiment analysis.
-    Tries supervised ML model first, falls back to VADER.
+    PRIORITY: Supervised ML (Instant/Site Showcase) -> Transformer (if enabled) -> VADER (Fallback)
     """
+    results = []
     pos_lbl = getattr(config, "pos_label", "Positive")
     neg_lbl = getattr(config, "neg_label", "Negative")
     neu_lbl = getattr(config, "neu_label", "Neutral")
-    
-    model, vectorizer = load_sentiment_model()
-    results = []
 
-    # 1. Try Supervised ML
+    # 1. Try Supervised ML (Best for Instant Showcase)
+    model, vectorizer = load_sentiment_model()
     if model and vectorizer:
         try:
             cleaned = [clean_text_v2(t) for t in texts]
@@ -245,12 +276,22 @@ def batch_analyze_sentiment(texts: List[str], config=None) -> List[Dict[str, Any
             
             label_map = {0: neg_lbl, 1: neu_lbl, 2: pos_lbl}
             for i, p in enumerate(preds):
-                # Score = (Prob[Pos] - Prob[Neg] + 1) / 2
+                # Calculate a more balanced score
                 score = round((probs[i][2] - probs[i][0] + 1.0) / 2.0, 3)
-                results.append({"label": label_map.get(p, neu_lbl), "score": score})
+                results.append({"label": label_map.get(p, neu_lbl), "score": score, "method": "supervised_ml"})
             return results
         except Exception:
-            pass # Fallback to VADER
+            pass # Fallback
+
+    # 2. Try Transformer (if enabled via ENV or Config)
+    use_trans = getattr(config, "use_transformer", os.environ.get("USE_TRANSFORMERS", "false").lower() == "true")
+    if use_trans:
+        results = analyze_sentiment_transformer(texts)
+        if results and results[0].get("label") != "ERROR":
+            return results
+
+    # 3. VADER Fallback (Last resort)
+    sia, _ = _get_nltk_resources()
 
     # 2. VADER Fallback
     sia, _ = _get_resources()
@@ -282,6 +323,40 @@ def batch_analyze_sentiment(texts: List[str], config=None) -> List[Dict[str, Any
             "score": round((comp + 1.0) / 2.0, 3)
         })
     return results
+
+# --- Transformer (Demo/Alternative) ---
+_transformer_pipeline = None
+
+def analyze_sentiment_transformer(texts: List[str]) -> List[Dict[str, Any]]:
+    """
+    Advanced sentiment analysis using HuggingFace Transformers.
+    Caches the model in memory for production performance.
+    """
+    global _transformer_pipeline
+    try:
+        if _transformer_pipeline is None:
+            from transformers import pipeline
+            # Lazy load and cache the pipeline
+            _transformer_pipeline = pipeline(
+                "sentiment-analysis", 
+                model="distilbert-base-uncased-finetuned-sst-2-english",
+                device=-1 # Set to 0 if you have a GPU
+            )
+        
+        # Process in batch
+        raw_results = _transformer_pipeline(texts, truncation=True, batch_size=8)
+        
+        results = []
+        for res in raw_results:
+            # Map label to system labels
+            label = res['label'].upper() # 'POSITIVE' or 'NEGATIVE'
+            score = round(res['score'], 3)
+            # If negative, we might want to scale score to 0-0.5 range for consistency if needed
+            # but usually transformer score is confidence in the label.
+            results.append({"label": label, "score": score, "method": "transformer"})
+        return results
+    except Exception as e:
+        return [{"label": "ERROR", "score": 0.5, "error": str(e)}] * len(texts)
 
 
 

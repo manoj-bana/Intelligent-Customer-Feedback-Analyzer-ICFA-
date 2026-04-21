@@ -50,3 +50,7 @@ uploads/*.json
 ml/plots/
 test_keywords.py
 *.zip
+
+# NLP/ML Data & Caches
+nltk_data/
+.cache/

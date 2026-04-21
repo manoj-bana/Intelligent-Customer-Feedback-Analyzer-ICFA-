@@ -64,7 +64,8 @@ def train():
     )
 
     print("🔢 Vectorizing with TF-IDF...")
-    vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1,2))
+    # Allow 2-letter words (e.g. 'no', 'ok') and negation-tokens (e.g. 'not_good')
+    vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1,2), token_pattern=r'\b[a-zA-Z_]{2,}\b')
     X_train_vec = vectorizer.fit_transform(X_train)
     X_test_vec = vectorizer.transform(X_test)
 

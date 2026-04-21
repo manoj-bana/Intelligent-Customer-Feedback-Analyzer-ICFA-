@@ -55,7 +55,13 @@ source venv/Scripts/activate  # On Windows, use `venv\Scripts\activate`
 pip install -r requirements.txt
 ```
 
-### 3. Database Initialization
+### 3. NLP Data Setup (Required)
+Download the necessary NLTK corpora for sentiment analysis and lemmatization:
+```bash
+python scripts/download_nltk.py
+```
+
+### 4. Database Initialization
 Ensure the database schema and security features are ready:
 ```bash
 python tools/migrate_hashes.py
