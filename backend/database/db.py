@@ -90,6 +90,7 @@ def _run_migrations():
         
         cfg_migrations = [
             ("low_risk_threshold", "ALTER TABLE company_configs ADD COLUMN low_risk_threshold FLOAT DEFAULT 0.10"),
+            ("churn_prediction_threshold", "ALTER TABLE company_configs ADD COLUMN churn_prediction_threshold FLOAT DEFAULT 0.50"),
         ]
         for col, sql in cfg_migrations:
             if col not in cfg_cols:

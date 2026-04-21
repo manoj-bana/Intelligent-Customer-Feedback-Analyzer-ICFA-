@@ -255,6 +255,7 @@ class UnifiedConfigUpdate(BaseModel):
     high_risk_threshold: Optional[float] = None
     medium_risk_threshold: Optional[float] = None
     low_risk_threshold: Optional[float] = None
+    churn_prediction_threshold: Optional[float] = None
     churn_rules: Optional[dict] = None
     
     # Mapping 
@@ -275,6 +276,7 @@ def get_unified_config(org_id: Optional[int] = Query(None), current_user: User =
                 "pos_threshold": 0.05, "neg_threshold": -0.05,
                 "high_risk_threshold": 0.70, "medium_risk_threshold": 0.40,
                 "low_risk_threshold": 0.10,
+                "churn_prediction_threshold": 0.50,
                 "org_id": target_org_id
             }
         return config

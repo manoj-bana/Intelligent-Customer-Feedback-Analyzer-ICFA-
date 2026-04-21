@@ -69,12 +69,16 @@ def show():
         med_t = col4.number_input("Medium Risk (>)", value=target_config.get("medium_risk_threshold", 0.40), step=0.01)
         low_t = col5.number_input("Low Risk (>)", value=target_config.get("low_risk_threshold", 0.10), step=0.01)
         
+        st.write("🔘 **Binary Decision Threshold**")
+        pred_t = st.number_input("Churn Decision Threshold (Yes/No)", value=target_config.get("churn_prediction_threshold", 0.50), step=0.01, help="Probability above this value will be marked as 'Yes' for churn.")
+
         if st.form_submit_button(f"💾 Save Churn Thresholds for {target_label.split(' ')[-1]}", use_container_width=True):
             payload = {
                 "org_id": target_org_id,
                 "high_risk_threshold": high_t,
                 "medium_risk_threshold": med_t,
-                "low_risk_threshold": low_t
+                "low_risk_threshold": low_t,
+                "churn_prediction_threshold": pred_t
             }
             update_res = requests.put(f"{API_URL}/admin/update-config", json=payload, headers=get_headers())
             if update_res.status_code == 200:
