@@ -255,72 +255,101 @@ def extract_keywords_tfidf(texts: list, top_n: int = 15) -> list:
     except Exception:
         return extract_keywords_frequency(texts, top_n)
 
+import re
+
+def _apply_keyword_boosters(text: str, current_score: float, pos_str: str, neg_str: str) -> float:
+    """Helper to adjust sentiment score based on separate pos/neg keywords."""
+    if not pos_str and not neg_str:
+        return current_score
+    
+    cleaned = str(text).lower()
+    new_score = current_score
+    
+    def get_list(s):
+        if not s: return []
+        # Support comma and semicolon
+        return [w.strip().lower() for w in re.split(r'[,;]', s) if w.strip()]
+
+    # 1. Positive Boost (+0.2 per hit)
+    for kw in get_list(pos_str):
+        if re.search(rf"\b{re.escape(kw)}\b", cleaned):
+            new_score += 0.20
+            
+    # 2. Negative Boost (-0.2 per hit)
+    for kw in get_list(neg_str):
+        if re.search(rf"\b{re.escape(kw)}\b", cleaned):
+            new_score -= 0.20
+    
+    # Clip to -1.0 to 1.0 range
+    return max(-1.0, min(1.0, new_score))
+
 def batch_analyze_sentiment(texts: List[str], config=None) -> List[Dict[str, Any]]:
     """
     Optimized batch sentiment analysis.
-    PRIORITY: Supervised ML (Instant/Site Showcase) -> Transformer (if enabled) -> VADER (Fallback)
+    PRIORITY: Supervised ML -> Transformer -> VADER
+    UNIFIED with Admin thresholds and separate Pos/Neg boosters.
     """
     results = []
     pos_lbl = getattr(config, "pos_label", "Positive")
     neg_lbl = getattr(config, "neg_label", "Negative")
     neu_lbl = getattr(config, "neu_label", "Neutral")
+    pos_thresh = getattr(config, "pos_threshold", 0.05)
+    neg_thresh = getattr(config, "neg_threshold", -0.05)
+    
+    pos_kw = getattr(config, "positive_keywords", "") or getattr(config, "keyword_boosters", "")
+    neg_kw = getattr(config, "negative_keywords", "")
 
-    # 1. Try Supervised ML (Best for Instant Showcase)
+    # 1. Try Supervised ML
     model, vectorizer = load_sentiment_model()
     if model and vectorizer:
         try:
             cleaned = [clean_text_v2(t) for t in texts]
             X_vec = vectorizer.transform(cleaned)
-            preds = model.predict(X_vec)
             probs = model.predict_proba(X_vec)
             
-            label_map = {0: neg_lbl, 1: neu_lbl, 2: pos_lbl}
-            for i, p in enumerate(preds):
-                # Calculate a more balanced score
-                score = round((probs[i][2] - probs[i][0] + 1.0) / 2.0, 3)
-                results.append({"label": label_map.get(p, neu_lbl), "score": score, "method": "supervised_ml"})
+            for i, p_row in enumerate(probs):
+                base_score = p_row[2] - p_row[0]
+                final_score = _apply_keyword_boosters(texts[i], base_score, pos_kw, neg_kw)
+                
+                if final_score >= pos_thresh: label = pos_lbl
+                elif final_score <= neg_thresh: label = neg_lbl
+                else: label = neu_lbl
+                
+                results.append({
+                    "label": label, 
+                    "score": round((final_score + 1.0) / 2.0, 3),
+                    "method": "supervised_ml"
+                })
             return results
         except Exception:
-            pass # Fallback
+            pass
 
-    # 2. Try Transformer (if enabled via ENV or Config)
+    # 2. Transformer
     use_trans = getattr(config, "use_transformer", os.environ.get("USE_TRANSFORMERS", "false").lower() == "true")
     if use_trans:
-        results = analyze_sentiment_transformer(texts)
-        if results and results[0].get("label") != "ERROR":
-            return results
+        trans_results = analyze_sentiment_transformer(texts)
+        if trans_results and trans_results[0].get("label") != "ERROR":
+            return trans_results
 
-    # 3. VADER Fallback (Last resort)
-    sia, _ = _get_nltk_resources()
-
-    # 2. VADER Fallback
+    # 3. VADER Fallback
     sia, _ = _get_resources()
-    pos_thresh = getattr(config, "pos_threshold", 0.05)
-    neg_thresh = getattr(config, "neg_threshold", -0.05)
-    
     for text in texts:
         if not text or str(text).strip() == "":
             results.append({"label": neu_lbl, "score": 0.5})
             continue
             
         cleaned = str(text).lower()
-        scores = sia.polarity_scores(cleaned)
-        comp = scores["compound"]
+        comp = sia.polarity_scores(cleaned)["compound"]
+        final_score = _apply_keyword_boosters(text, comp, pos_kw, neg_kw)
         
-        # Keyword boosters if in config
-        boosters = getattr(config, "keyword_boosters", "")
-        if boosters:
-            for kw in boosters.split(","):
-                if kw.strip().lower() in cleaned:
-                    comp += 0.1
-
-        if comp >= pos_thresh: label = pos_lbl
-        elif comp <= neg_thresh: label = neg_lbl
+        if final_score >= pos_thresh: label = pos_lbl
+        elif final_score <= neg_thresh: label = neg_lbl
         else: label = neu_lbl
         
         results.append({
             "label": label, 
-            "score": round((comp + 1.0) / 2.0, 3)
+            "score": round((final_score + 1.0) / 2.0, 3),
+            "method": "vader_fallback"
         })
     return results
 
