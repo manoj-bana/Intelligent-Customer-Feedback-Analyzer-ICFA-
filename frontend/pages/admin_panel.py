@@ -154,15 +154,42 @@ def render_notifications():
 
 def render_config():
     st.subheader("⚙️ Organization Analysis Tuning")
-    st.markdown("Customize your company's analysis rules and thresholds.")
+    st.markdown("Customize analysis rules and thresholds for specific organizations.")
     
-    # 1. Sentiment Configuration
-    st.divider()
-    st.markdown("### 🎭 Sentiment Engine")
+    # 0. Organization Selection
+    org_id = None
     try:
-        res = requests.get(f"{API_URL}/admin/config/sentiment", headers=get_headers())
+        org_res = requests.get(f"{API_URL}/admin/organizations", headers=get_headers())
+        if org_res.status_code == 200:
+            orgs = org_res.json()
+            org_options = {f"🏢 {o['name']}": o['id'] for o in orgs}
+            # Allow "Global / Individual" (org_id=None)
+            options = ["-- Select Option --", "🌐 Global / Individual"] + list(org_options.keys())
+            selected_option = st.selectbox("Select Target to Configure", options)
+            
+            if selected_option == "🌐 Global / Individual":
+                org_id = None
+            elif selected_option != "-- Select Option --":
+                org_id = org_options[selected_option]
+            else:
+                st.info("Please select an organization or 'Global' to view and edit settings.")
+                return
+        else:
+            st.error("Failed to load organizations.")
+            return
+    except Exception as e:
+        st.error(f"Error loading organizations: {e}")
+        return
+
+    # 1. Fetch Configuration
+    try:
+        res = requests.get(f"{API_URL}/admin/config/get", params={"org_id": org_id}, headers=get_headers())
         if res.status_code == 200:
             cfg = res.json()
+            
+            # Sentiment Configuration
+            st.divider()
+            st.markdown("### 🎭 Sentiment Engine")
             with st.form("sentiment_cfg_form"):
                 c1, c2 = st.columns(2)
                 pos_t = c1.slider("Positive Threshold", 0.0, 1.0, float(cfg.get("pos_threshold", 0.05)), step=0.01)
@@ -177,36 +204,40 @@ def render_config():
                 
                 if st.form_submit_button("💾 Save Sentiment Rules"):
                     update_data = {
+                        "org_id": org_id,
                         "pos_threshold": pos_t, "neg_threshold": neg_t,
                         "pos_label": pos_l, "neg_label": neg_l, "neu_label": neu_l,
                         "keyword_boosters": boosters
                     }
-                    requests.put(f"{API_URL}/admin/config/sentiment", json=update_data, headers=get_headers())
+                    requests.put(f"{API_URL}/admin/config/update", json=update_data, headers=get_headers())
                     st.toast("Sentiment rules updated!")
-        else:
-            st.warning("Could not fetch sentiment config.")
-    except Exception as e:
-        st.error(f"Error: {e}")
 
-    # 2. Churn Configuration
-    st.divider()
-    st.markdown("### 📉 Churn Predictor")
-    try:
-        res = requests.get(f"{API_URL}/admin/config/churn", headers=get_headers())
-        if res.status_code == 200:
-            cfg = res.json()
+            # Churn Configuration
+            st.divider()
+            st.markdown("### 📉 Churn Predictor")
             with st.form("churn_cfg_form"):
-                high_t = st.slider("High Risk Probability (%)", 0, 100, int(float(cfg.get("high_risk_threshold", 0.70)) * 100))
-                med_t = st.slider("Medium Risk Probability (%)", 0, 100, int(float(cfg.get("medium_risk_threshold", 0.40)) * 100))
+                st.info("Thresholds determine how customers are categorized based on their churn probability.")
                 
+                col1, col2 = st.columns(2)
+                high_t = col1.slider("High Risk Probability (%)", 0, 100, int(float(cfg.get("high_risk_threshold", 0.70)) * 100))
+                med_t = col2.slider("Medium Risk Probability (%)", 0, 100, int(float(cfg.get("medium_risk_threshold", 0.40)) * 100))
+                low_t = col1.slider("Low Risk Probability (%)", 0, 100, int(float(cfg.get("low_risk_threshold", 0.10)) * 100))
+                
+                st.markdown("#### 🔘 Binary Prediction Threshold")
+                pred_t = st.slider("Churn Decision Threshold (Yes/No) (%)", 1, 99, int(float(cfg.get("churn_prediction_threshold", 0.50)) * 100), 
+                                   help="Customers with churn probability above this value will be marked as 'Yes' for churn.")
+
                 if st.form_submit_button("💾 Save Churn Rules"):
                     update_data = {
+                        "org_id": org_id,
                         "high_risk_threshold": high_t / 100.0,
-                        "medium_risk_threshold": med_t / 100.0
+                        "medium_risk_threshold": med_t / 100.0,
+                        "low_risk_threshold": low_t / 100.0,
+                        "churn_prediction_threshold": pred_t / 100.0
                     }
-                    requests.put(f"{API_URL}/admin/config/churn", json=update_data, headers=get_headers())
+                    requests.put(f"{API_URL}/admin/config/update", json=update_data, headers=get_headers())
                     st.toast("Churn rules updated!")
         else:
-            st.warning("Could not fetch churn config.")
+            st.warning("Could not fetch configuration for this organization.")
     except Exception as e:
         st.error(f"Error: {e}")

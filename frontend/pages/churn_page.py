@@ -13,11 +13,11 @@ def get_headers():
     token = st.session_state.get("token")
     return {"Authorization": f"Bearer {token}"} if token else {}
 
-def fetch_churn_data(case_id, page=1, limit=10, search=""):
+def fetch_churn_data(case_id, page=1, limit=10, search="", risk_level=None):
     try:
         res = requests.get(
             f"{API_URL}/ingest/results/{case_id}",
-            params={"page": page, "limit": limit, "search": search},
+            params={"page": page, "limit": limit, "search": search, "risk_level": risk_level},
             headers=get_headers(),
             timeout=10
         )
@@ -83,6 +83,7 @@ def show():
             st.session_state.active_churn_case_id = case_id
             st.session_state.churn_page_num = 1
             st.session_state.churn_q_in = ""
+            st.session_state.churn_risk_filter = "All"
             st.session_state.churn_metadata = None
 
         if st.session_state.churn_metadata is None:
@@ -110,18 +111,60 @@ def render_churn_table_paginated(case_id):
     """Renders the detailed churn table with server-side pagination."""
     @st.fragment
     def _churn_results_fragment():
-        st.subheader("📋 Client Risk Profile")
+        page = st.session_state.get("churn_page_num", 1)
+        risk_filter = st.session_state.get("churn_risk_filter", "All")
+        search_query = st.session_state.get("churn_q_in", "")
         
-        search_query = st.text_input("🔍 Search Customer ID", value=st.session_state.get("churn_q_in", ""), placeholder="Enter ID...")
-        if search_query != st.session_state.get("churn_q_in"):
-            st.session_state.churn_q_in = search_query
+        # Fetch data first to get counts and current page
+        data = fetch_churn_data(case_id, page=page, limit=10, search=search_query, risk_level=risk_filter)
+        
+        if not data:
+            st.warning("Failed to fetch data.")
+            return
+
+        # Risk Level Filter Buttons
+        risk_counts = data.get("risk_counts", {"low": 0, "medium": 0, "high": 0, "safe": 0})
+        active_filter = st.session_state.get("churn_risk_filter", "All")
+        
+        st.subheader("📋 Client Risk Profile")
+        cols = st.columns([1, 1.2, 1.2, 1.2, 1])
+        with cols[1]:
+            if st.button(f"Low ({risk_counts.get('low', 0)})", use_container_width=True, 
+                         type="primary" if active_filter == "Low" else "secondary"):
+                st.session_state.churn_risk_filter = "Low"
+                st.session_state.churn_page_num = 1
+                st.rerun()
+        with cols[2]:
+            if st.button(f"Medium ({risk_counts.get('medium', 0)})", use_container_width=True,
+                         type="primary" if active_filter == "Medium" else "secondary"):
+                st.session_state.churn_risk_filter = "Medium"
+                st.session_state.churn_page_num = 1
+                st.rerun()
+        with cols[3]:
+            if st.button(f"High ({risk_counts.get('high', 0)})", use_container_width=True,
+                         type="primary" if active_filter == "High" else "secondary"):
+                st.session_state.churn_risk_filter = "High"
+                st.session_state.churn_page_num = 1
+                st.rerun()
+        
+        # Add a reset filter button if something is selected
+        if active_filter != "All":
+            c1, c2, c3 = st.columns([2, 1, 2])
+            with c2:
+                if st.button("Clear Filter", icon="✖️", use_container_width=True):
+                    st.session_state.churn_risk_filter = "All"
+                    st.session_state.churn_page_num = 1
+                    st.rerun()
+
+        st.divider()
+
+        search_query_new = st.text_input("🔍 Search Customer ID", value=search_query, placeholder="Enter ID...")
+        if search_query_new != search_query:
+            st.session_state.churn_q_in = search_query_new
             st.session_state.churn_page_num = 1
             st.rerun()
 
-        page = st.session_state.get("churn_page_num", 1)
-        data = fetch_churn_data(case_id, page=page, limit=10, search=search_query)
-            
-        if not data or "predictions" not in data or not data["predictions"]:
+        if "predictions" not in data or not data["predictions"]:
             st.warning("No records found.")
             return
 

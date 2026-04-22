@@ -418,6 +418,7 @@ def get_case_results(
     limit: int = 10, 
     search: str = "",
     sentiment: str = None,
+    risk_level: str = None,
     sort_by: str = None,
     sort_order: str = "desc",
     current_user: User = Depends(get_current_user),
@@ -437,20 +438,56 @@ def get_case_results(
         if list_key in data:
             full_list = data[list_key]
             
+            # Helper to find or calculate risk level in an item (handles varies key names and missing data)
+            def get_effective_risk(item):
+                # 1. Try to find existing key
+                for k in ["risk_level", "risklevel", "risk level", "risk_score", "risk"]:
+                    val = item.get(k) or next((v for kn, v in item.items() if kn.lower().replace(" ","").replace("_","") == k), None)
+                    if val: return str(val).lower().strip()
+                
+                # 2. Fallback: Calculate from probability if available
+                prob = item.get("churn_probability", item.get("probability", item.get("score")))
+                if prob is not None:
+                    try:
+                        p = float(prob)
+                        if p > 0.7: return "high"
+                        if p > 0.4: return "medium"
+                        if p > 0.1: return "low"
+                        return "safe"
+                    except: pass
+                return "low" # Default fallback
+
             # 1. Apply Search
             if search:
                 q = search.lower()
                 full_list = [i for i in full_list if any(q in str(v).lower() for v in i.values())]
+
+            # 2. Calculate Risk Counts (ALWAYS from UNFILTERED list in data[list_key])
+            raw_data_list = data.get(list_key, [])
+            data["risk_counts"] = {
+                "low": sum(1 for x in raw_data_list if get_effective_risk(x) in ["low", "safe"]),
+                "medium": sum(1 for x in raw_data_list if get_effective_risk(x) == "medium"),
+                "high": sum(1 for x in raw_data_list if get_effective_risk(x) == "high"),
+                "safe": sum(1 for x in raw_data_list if get_effective_risk(x) == "safe"),
+            }
             
-            # 2. Apply Sentiment Filter
+            # 3. Apply Sentiment Filter
             if sentiment and sentiment.lower() != "all":
                 sent_lower = sentiment.lower()
                 full_list = [
                     item for item in full_list
                     if str(item.get("sentiment_label", item.get("label", ""))).lower() == sent_lower
                 ]
+
+            # 4. Apply Risk Level Filter
+            if risk_level and risk_level.lower() != "all":
+                target_risk = risk_level.lower().strip()
+                full_list = [
+                    item for item in full_list 
+                    if get_effective_risk(item) == target_risk or (target_risk == "low" and get_effective_risk(item) == "safe")
+                ]
             
-            # 3. Apply Sorting
+            # 5. Apply Sorting
             if sort_by:
                 reverse = (sort_order.lower() == "desc")
                 try:

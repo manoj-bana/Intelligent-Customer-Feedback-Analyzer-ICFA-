@@ -23,6 +23,7 @@ class CompanyConfig(Base):
     high_risk_threshold = Column(Float, default=0.70)
     medium_risk_threshold = Column(Float, default=0.40)
     low_risk_threshold = Column(Float, default=0.10)
+    churn_prediction_threshold = Column(Float, default=0.50)
     churn_rules = Column(JSON, nullable=True) # Logic rules for predictability
     
     # Mapping Settings

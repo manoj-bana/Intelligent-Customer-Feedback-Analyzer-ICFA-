@@ -100,6 +100,7 @@ def predict_churn(df: pd.DataFrame, config=None) -> dict:
     high_thresh = config.high_risk_threshold if config and hasattr(config, "high_risk_threshold") else 0.70
     med_thresh = config.medium_risk_threshold if config and hasattr(config, "medium_risk_threshold") else 0.40
     low_thresh = config.low_risk_threshold if config and hasattr(config, "low_risk_threshold") else 0.10
+    prediction_thresh = config.churn_prediction_threshold if config and hasattr(config, "churn_prediction_threshold") else 0.50
 
     model = load_churn_model()
     if model is None:
@@ -118,7 +119,7 @@ def predict_churn(df: pd.DataFrame, config=None) -> dict:
     
     # Calculate probabilities and binary predictions
     probs = model.predict_proba(processed)[:, 1]
-    predictions = (probs >= 0.5).astype(int)
+    predictions = (probs >= prediction_thresh).astype(int)
     
     # Try to find a customer ID column to preserve
     id_col = next((c for c in df.columns if any(k in c.lower() for k in ["customerid", "customer_id", "userid", "user_id", "id"])), None)
