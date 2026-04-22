@@ -24,9 +24,9 @@ def predict_churn(df: pd.DataFrame, config: Any = None) -> Dict[str, Any]:
         return {"error": "Model not available."}
 
     # 1. Config Thresholds  
-    high_thresh = getattr(config, "high_risk_threshold", 0.70)
-    med_thresh = getattr(config, "medium_risk_threshold", 0.40)
-    churn_threshold = 0.50
+    high_thresh = float(getattr(config, "high_risk_threshold", 0.70) or 0.70)
+    med_thresh = float(getattr(config, "medium_risk_threshold", 0.40) or 0.40)
+    churn_threshold = float(getattr(config, "churn_prediction_threshold", 0.50) or 0.50)
     
     # 2. Preprocessing & Feature Alignment
     features = df.copy()
