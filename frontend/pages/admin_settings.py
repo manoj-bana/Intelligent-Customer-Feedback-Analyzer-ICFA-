@@ -19,23 +19,8 @@ def show():
     except:
         global_config = {}
 
-    # --- SECTION: GLOBAL SENTIMENT ---
-    with st.form("sentiment_config_form"):
-        st.subheader("💬 Global Sentiment Configuration")
-        col1, col2 = st.columns(2)
-        pos_t = col1.number_input("Positive Threshold", value=global_config.get("pos_threshold", 0.05), format="%.3f")
-        neg_t = col2.number_input("Negative Threshold", value=global_config.get("neg_threshold", -0.05), format="%.3f")
-        keywords = st.text_area("Keyword Boosters (comma separated)", value=global_config.get("keyword_boosters", ""))
-        
-        if st.form_submit_button("💾 Save Global Sentiment Settings", use_container_width=True):
-            payload = {"pos_threshold": pos_t, "neg_threshold": neg_t, "keyword_boosters": keywords}
-            requests.put(f"{API_URL}/admin/update-config", json=payload, headers=get_headers())
-            st.success("Global sentiment settings saved.")
-
-    st.divider()
-
-    # --- SECTION: ORGANISATION-SPECIFIC CHURN ---
-    st.subheader("📉 Organisation Churn Thresholds")
+    # --- SECTION: ORGANISATION CONFIGURATION (Sentiment & Churn) ---
+    st.subheader("🏢 Organisation Specific Settings")
     
     # 1. Fetch List of Organizations
     orgs = []
@@ -48,12 +33,11 @@ def show():
     for o in orgs:
         org_options[f"🏢 {o['name']}"] = o['id']
 
-    # THE SELECT BUTTON / DROPDOWN (Beside the thresholds)
-    sel_col1, sel_col2 = st.columns([2, 1])
-    target_label = sel_col1.selectbox("Select Organisation to Configure Churn:", list(org_options.keys()))
+    # THE SELECT BUTTON / DROPDOWN
+    target_label = st.selectbox("Select Organisation to Configure:", list(org_options.keys()))
     target_org_id = org_options[target_label]
 
-    # Fetch specific churn thresholds for this target
+    # Fetch specific config for this target
     try:
         url = f"{API_URL}/admin/get-config"
         if target_org_id is not None: url += f"?org_id={target_org_id}"
@@ -62,23 +46,49 @@ def show():
     except:
         target_config = {}
 
-    with st.form("churn_config_form"):
-        st.caption(f"Configuring churn for: **{target_label}**")
-        col3, col4, col5 = st.columns(3)
-        high_t = col3.number_input("High Risk (>)", value=target_config.get("high_risk_threshold", 0.70), step=0.01)
-        med_t = col4.number_input("Medium Risk (>)", value=target_config.get("medium_risk_threshold", 0.40), step=0.01)
-        low_t = col5.number_input("Low Risk (>)", value=target_config.get("low_risk_threshold", 0.10), step=0.01)
+    with st.form("unified_config_form"):
+        st.info(f"Currently configuring: **{target_label}**")
         
-        if st.form_submit_button(f"💾 Save Churn Thresholds for {target_label.split(' ')[-1]}", use_container_width=True):
+        # --- SENTIMENT RULES ---
+        st.markdown("#### 💬 Sentiment Analysis Rules")
+        col1, col2 = st.columns(2)
+        pos_t = col1.number_input("Positive Threshold", value=float(target_config.get("pos_threshold", 0.05)), format="%.3f", step=0.01)
+        neg_t = col2.number_input("Negative Threshold", value=float(target_config.get("neg_threshold", -0.05)), format="%.3f", step=0.01)
+        
+        col_l1, col_l2, col_l3 = st.columns(3)
+        pos_l = col_l1.text_input("Positive Label", value=target_config.get("pos_label", "Positive"))
+        neg_l = col_l2.text_input("Negative Label", value=target_config.get("neg_label", "Negative"))
+        neu_l = col_l3.text_input("Neutral Label", value=target_config.get("neu_label", "Neutral"))
+        
+        pk_col, nk_col = st.columns(2)
+        pos_kw = pk_col.text_area("🟢 Positive Keywords", value=target_config.get("positive_keywords", "") or target_config.get("keyword_boosters", ""), placeholder="excellent, amazing, helpful...")
+        neg_kw = nk_col.text_area("🔴 Negative Keywords", value=target_config.get("negative_keywords", ""), placeholder="broken, terrible, slow, bad...")
+        
+        st.divider()
+        
+        # --- CHURN THRESHOLDS ---
+        st.markdown("#### 📉 Churn Prediction Risk Thresholds")
+        col3, col4, col5 = st.columns(3)
+        high_t = col3.number_input("High Risk (>)", value=float(target_config.get("high_risk_threshold", 0.70)), step=0.01)
+        med_t = col4.number_input("Medium Risk (>)", value=float(target_config.get("medium_risk_threshold", 0.40)), step=0.01)
+        low_t = col5.number_input("Low Risk (>)", value=float(target_config.get("low_risk_threshold", 0.10)), step=0.01)
+        
+        if st.form_submit_button(f"💾 Save Configuration for {target_label.split(' ')[-1]}", use_container_width=True):
             payload = {
                 "org_id": target_org_id,
+                "pos_threshold": pos_t,
+                "neg_threshold": neg_t,
+                "pos_label": pos_l,
+                "neg_label": neg_l,
+                "neu_label": neu_l,
+                "positive_keywords": pos_kw,
+                "negative_keywords": neg_kw,
                 "high_risk_threshold": high_t,
                 "medium_risk_threshold": med_t,
                 "low_risk_threshold": low_t
             }
             update_res = requests.put(f"{API_URL}/admin/update-config", json=payload, headers=get_headers())
             if update_res.status_code == 200:
-                st.success(f"Churn thresholds for {target_label} updated!")
-                # Removed st.rerun() to prevent the success message from disappearing
+                st.success(f"Configuration for {target_label} updated successfully!")
             else:
-                st.error("Failed to update.")
+                st.error("Failed to update configuration.")

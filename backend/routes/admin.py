@@ -250,6 +250,8 @@ class UnifiedConfigUpdate(BaseModel):
     neg_label: Optional[str] = None
     neu_label: Optional[str] = None
     keyword_boosters: Optional[str] = None
+    positive_keywords: Optional[str] = None
+    negative_keywords: Optional[str] = None
     
     # Churn
     high_risk_threshold: Optional[float] = None
@@ -270,12 +272,22 @@ def get_unified_config(org_id: Optional[int] = Query(None), current_user: User =
         target_org_id = org_id if current_user.role == "admin" else current_user.org_id
         
         config = db.query(CompanyConfig).filter(CompanyConfig.org_id == target_org_id).first()
+        
+        # Fallback to Global if specific org config doesn't exist
+        if not config and target_org_id is not None:
+            config = db.query(CompanyConfig).filter(CompanyConfig.org_id == None).first()
+            
         if not config:
+            # Absolute fallback if even Global is missing from DB
             return {
                 "pos_threshold": 0.05, "neg_threshold": -0.05,
+                "pos_label": "Positive", "neg_label": "Negative", "neu_label": "Neutral",
                 "high_risk_threshold": 0.70, "medium_risk_threshold": 0.40,
                 "low_risk_threshold": 0.10,
-                "org_id": target_org_id
+                "org_id": target_org_id,
+                "keyword_boosters": "",
+                "positive_keywords": "",
+                "negative_keywords": ""
             }
         return config
     finally:

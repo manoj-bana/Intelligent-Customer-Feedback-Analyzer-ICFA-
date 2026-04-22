@@ -17,7 +17,9 @@ class CompanyConfig(Base):
     pos_label = Column(String, default="Positive")
     neg_label = Column(String, default="Negative")
     neu_label = Column(String, default="Neutral")
-    keyword_boosters = Column(String, nullable=True) # Comma-separated or JSON
+    keyword_boosters = Column(String, nullable=True) # Legacy
+    positive_keywords = Column(String, nullable=True) # New
+    negative_keywords = Column(String, nullable=True) # New
     
     # Churn Settings
     high_risk_threshold = Column(Float, default=0.70)

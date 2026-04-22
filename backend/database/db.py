@@ -90,6 +90,8 @@ def _run_migrations():
         
         cfg_migrations = [
             ("low_risk_threshold", "ALTER TABLE company_configs ADD COLUMN low_risk_threshold FLOAT DEFAULT 0.10"),
+            ("positive_keywords", "ALTER TABLE company_configs ADD COLUMN positive_keywords TEXT"),
+            ("negative_keywords", "ALTER TABLE company_configs ADD COLUMN negative_keywords TEXT"),
         ]
         for col, sql in cfg_migrations:
             if col not in cfg_cols:

@@ -83,8 +83,12 @@ def process_data_pipeline(case_id: str, file_path: str, task_type: str):
         else:
             df = pd.read_csv(file_path)
             
-        # 2. Schema Mapping
+        # 2. Schema Mapping & Config Fallback
         config = db.query(CompanyConfig).filter(CompanyConfig.org_id == dataset.org_id).first()
+        if not config:
+            # Fallback to Global Defaults (org_id is NULL/None)
+            config = db.query(CompanyConfig).filter(CompanyConfig.org_id == None).first()
+            
         df_mapped, mapping_info = map_schema(df, config.column_mapper if config else None)
         
         print(f"[PIPELINE] Task: {task_type} | Case: {case_id}")
