@@ -30,8 +30,11 @@ db_module.SessionLocal = _TestSessionLocal
 import backend.auth as auth_module
 auth_module.SessionLocal = _TestSessionLocal
 
-import backend.routes.ingest as ingest_module
-ingest_module.SessionLocal = _TestSessionLocal
+try:
+    import backend.routes.ingest as ingest_module
+    ingest_module.SessionLocal = _TestSessionLocal
+except ImportError as e:
+    print(f"Warning: Could not patch ingest_module: {e}")
 
 @pytest.fixture(autouse=True)
 def reset_state_between_tests():
