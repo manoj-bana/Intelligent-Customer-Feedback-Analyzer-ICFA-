@@ -163,6 +163,105 @@ def delete_user(
     finally:
         db.close()
 
+@router.post("/users/{user_id}/reactivate")
+def reactivate_user(user_id: int, current_user: User = Depends(get_current_user)):
+    """Restore a deactivated user account (Admin only)."""
+    db = SessionLocal()
+    try:
+        verify_admin(current_user)
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        user.is_active = 1
+        db.commit()
+        return {"message": f"User {user_id} reactivated"}
+    finally:
+        db.close()
+
+@router.post("/users/{user_id}/demote")
+def demote_user(user_id: int, current_user: User = Depends(get_current_user)):
+    """Revoke admin privileges and return user to regular status (Admin only)."""
+    db = SessionLocal()
+    try:
+        verify_admin(current_user)
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        if user.id == current_user.id:
+            raise HTTPException(status_code=400, detail="Cannot demote yourself")
+            
+        user.role = "user"
+        db.commit()
+        return {"message": f"User {user_id} demoted to user"}
+    finally:
+        db.close()
+
+# --- Admin Request Management ---
+
+@router.get("/admin-requests")
+def list_admin_requests(current_user: User = Depends(get_current_user)):
+    """Fetch all admin elevation requests (Admin only)."""
+    db = SessionLocal()
+    try:
+        verify_admin(current_user)
+        requests = db.query(AdminRequest).all()
+        return {"requests": [
+            {
+                "id": r.id, 
+                "username": r.username, 
+                "reason": r.reason, 
+                "status": r.status, 
+                "created_at": r.created_at
+            } for r in requests
+        ]}
+    finally:
+        db.close()
+
+@router.post("/admin-requests/{request_id}/approve")
+def approve_admin_request(request_id: int, current_user: User = Depends(get_current_user)):
+    """Approve a privilege elevation request (Admin only)."""
+    db = SessionLocal()
+    try:
+        verify_admin(current_user)
+        req = db.query(AdminRequest).filter(AdminRequest.id == request_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="Request not found")
+            
+        user = db.query(User).filter(User.username == req.username).first()
+        if user:
+            user.role = "admin"
+            notif = Notification(user_id=user.id, message="🎉 Your admin request has been APPROVED!", is_read=0)
+            db.add(notif)
+            
+        req.status = "approved"
+        db.commit()
+        return {"message": f"Successfully elevated {req.username} to Admin"}
+    finally:
+        db.close()
+
+@router.post("/admin-requests/{request_id}/reject")
+def reject_admin_request(request_id: int, current_user: User = Depends(get_current_user)):
+    """Reject a privilege elevation request (Admin only)."""
+    db = SessionLocal()
+    try:
+        verify_admin(current_user)
+        req = db.query(AdminRequest).filter(AdminRequest.id == request_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="Request not found")
+            
+        user = db.query(User).filter(User.username == req.username).first()
+        if user:
+            notif = Notification(user_id=user.id, message="⚠️ Your admin request was rejected.", is_read=0)
+            db.add(notif)
+            
+        req.status = "rejected"
+        db.commit()
+        return {"message": "Request rejected"}
+    finally:
+        db.close()
+
 
 @router.post("/datasets/{case_id}/retry")
 def admin_retry_dataset(

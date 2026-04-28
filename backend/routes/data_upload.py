@@ -12,6 +12,11 @@ import traceback
 import datetime
 from sqlalchemy.orm import Session
 from backend.database.db import SessionLocal, get_db
+from dotenv import load_dotenv
+# Robust .env loading - look for it in the project root relative to this file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+load_dotenv(env_path)
+
 from backend.database.models import User, Dataset, Notification, Organization
 from backend.models.config import CompanyConfig
 from backend.services.feedback_classifier import batch_analyze_sentiment, extract_keywords_frequency, extract_keywords_tfidf
@@ -202,15 +207,17 @@ async def retry_case(case_id: str, background_tasks: BackgroundTasks, db: Sessio
 
 # google.genai is an optional dependency (used for Gemini image extraction).
 # Import lazily and tolerate ImportError so the whole app can run without it.
+GEMINI_AVAILABLE = False
+GEMINI_ERROR = None
 try:
     import google.genai as genai
     from google.genai import types
-    gemini_client = genai.Client()
     GEMINI_AVAILABLE = True
-except Exception:
-    genai = None
-    types = None
-    gemini_client = None
+except ImportError as e:
+    GEMINI_ERROR = f"google-genai package not installed: {e}"
+    GEMINI_AVAILABLE = False
+except Exception as e:
+    GEMINI_ERROR = f"Unexpected initialization error: {e}"
     GEMINI_AVAILABLE = False
 
 def process_image_extraction_background(case_id: str, image_path: str, content_type: str, task_type: str):
@@ -235,11 +242,34 @@ def process_image_extraction_background(case_id: str, image_path: str, content_t
 
         prompt = "This image contains a data table. Extract ALL rows and columns exactly as shown without skipping or summarizing anything. Return only valid CSV text with headers in the first row. IMPORTANT: Any text field containing commas MUST be wrapped in double quotes. No explanation, no markdown, no code blocks — just raw CSV."
         
-        response = gemini_client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[prompt, types.Part.from_bytes(data=image_bytes, mime_type=content_type)]
-        )
-        csv_text = response.text.strip()
+        import time
+        max_retries = 3
+        csv_text = ""
+        
+        for attempt in range(max_retries):
+            # Fallback hierarchy: 3-flash-preview -> 2.0-flash -> 1.5-flash
+            if attempt == 0:
+                model_to_use = "gemini-3-flash-preview"
+            elif attempt == 1:
+                model_to_use = "gemini-2.0-flash"
+            else:
+                model_to_use = "gemini-1.5-flash"
+            
+            try:
+                client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+                response = client.models.generate_content(
+                    model=model_to_use,
+                    contents=[prompt, types.Part.from_bytes(data=image_bytes, mime_type=content_type)]
+                )
+                csv_text = response.text.strip()
+                break
+            except Exception as e:
+                if ("429" in str(e) or "quota" in str(e).lower()) and attempt < max_retries - 1:
+                    # Exponential backoff: 2s, 4s, 8s...
+                    wait_time = (2 ** (attempt + 1))
+                    time.sleep(wait_time)
+                    continue
+                raise e
         
         # Cleanup markdown formatting if Gemini adds it
         if csv_text.startswith("```"):
@@ -271,61 +301,65 @@ def process_image_extraction_background(case_id: str, image_path: str, content_t
             except: pass
 
 @router.post("/upload-image")
-def upload_image(
+async def upload_image(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     username: str = Form(...),
-    task_type: str = Form(...)
+    task_type: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Queues an image for OCR extraction and analysis.
-    """
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == username).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+    """Upload an image for OCR processing (e.g., feedback screenshots)."""
+    if current_user.username != username and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Unauthorized to upload for this user")
+        
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        user = db.query(User).filter(User.username.ilike(username)).first()
+    if not user: raise HTTPException(status_code=404, detail="User not found")
 
-        if not GEMINI_AVAILABLE:
-            raise HTTPException(status_code=503, detail="Image extraction is unavailable: optional google.genai package is not installed.")
+    if not GEMINI_AVAILABLE:
+        raise HTTPException(status_code=503, detail=f"Image extraction is unavailable: {GEMINI_ERROR or 'optional google.genai package is not installed.'}")
 
-        case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
-        temp_image_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")
+    case_id = f"CA{uuid.uuid4().hex[:8].upper()}"
+    temp_image_path = os.path.join(UPLOAD_DIR, f"{case_id}_{file.filename}")
 
-        with open(temp_image_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+    with open(temp_image_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-        new_ds = Dataset(
-            case_id=case_id,
-            user_id=user.id,
-            org_id=user.org_id,
-            filename=f"{file.filename.rsplit('.', 1)[0]}.csv",
-            file_path=temp_image_path,
-            source="image",
-            review_status="Extracting Table...",
-            extraction_status="OCR in progress",
-            task_type=task_type
-        )
-        db.add(new_ds)
-        db.commit()
+    new_ds = Dataset(
+        case_id=case_id,
+        user_id=user.id,
+        org_id=user.org_id,
+        filename=f"{file.filename.rsplit('.', 1)[0]}.csv",
+        file_path=temp_image_path,
+        source="image",
+        review_status="Extracting Table...",
+        extraction_status="OCR in progress",
+        task_type=task_type
+    )
+    db.add(new_ds)
+    db.commit()
 
-        background_tasks.add_task(
-            process_image_extraction_background,
-            case_id=case_id,
-            image_path=temp_image_path,
-            content_type=file.content_type or 'image/png',
-            task_type=task_type
-        )
-        return {"message": "Image queued for extraction", "case_id": case_id}
-    finally:
-        db.close()
+    background_tasks.add_task(
+        process_image_extraction_background,
+        case_id=case_id,
+        image_path=temp_image_path,
+        content_type=file.content_type or 'image/png',
+        task_type=task_type
+    )
+    return {"message": "Image queued for extraction", "case_id": case_id}
 
 
 @router.delete("/cases/all/{username}")
-def delete_all_cases(username: str, db: Session = Depends(get_db)):
+def delete_all_cases(username: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Delete all cases and associated files for a user.
     """
+    if current_user.username != username and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Unauthorized")
+        
     try:
         user = db.query(User).filter(User.username == username).first()
         if not user:
@@ -354,8 +388,10 @@ def get_user_cases(username: str, current_user: User = Depends(get_current_user)
         
         query = db.query(Dataset)
         if current_user.role != "admin" and current_user.username != "admin":
-             query = query.filter(Dataset.org_id == current_user.org_id)
+             # Silo Check: Regular users only see their own org/user data
              query = query.filter(Dataset.user_id == current_user.id)
+             if current_user.org_id:
+                 query = query.filter(Dataset.org_id == current_user.org_id)
             
         datasets = query.order_by(Dataset.id.desc()).all()
         return {
@@ -378,6 +414,11 @@ def get_notifications(username: str, current_user: User = Depends(get_current_us
     try:
         user = db.query(User).filter(User.username == username).first()
         if not user: raise HTTPException(status_code=404, detail="User not found")
+        
+        # Silo Check: Only self or admin can view notifications
+        if current_user.username != username and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Unauthorized to view these notifications")
+
         notifs = db.query(Notification).filter(Notification.user_id == user.id).order_by(Notification.id.desc()).all()
         return {
             "notifications": [
@@ -389,10 +430,12 @@ def get_notifications(username: str, current_user: User = Depends(get_current_us
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/notifications/read/{notif_id}")
-def mark_notification_read(notif_id: int, db: Session = Depends(get_db)):
+def mark_notification_read(notif_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         notif = db.query(Notification).filter(Notification.id == notif_id).first()
         if notif:
+            if notif.user_id != current_user.id and current_user.role != "admin":
+                raise HTTPException(status_code=403, detail="Forbidden")
             notif.is_read = 1
             db.commit()
         return {"message": "Updated"}
@@ -405,6 +448,11 @@ def delete_case(case_id: str, current_user: User = Depends(get_current_user), db
     try:
         ds = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not ds: raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Silo Check: Ownership or Admin
+        if ds.user_id != current_user.id and current_user.role != "admin":
+             raise HTTPException(status_code=403, detail="Unauthorized to delete this case")
+
         if os.path.exists(ds.file_path): 
             try: os.remove(ds.file_path)
             except: pass
@@ -431,6 +479,12 @@ def get_case_results(
     try:
         dataset = db.query(Dataset).filter(Dataset.case_id == case_id).first()
         if not dataset: raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Silo Check: Ownership or Admin
+        if dataset.user_id != current_user.id and current_user.role != "admin":
+             # If it's the same org, maybe allow it? Usually better to be strict.
+             if dataset.org_id != current_user.org_id:
+                 raise HTTPException(status_code=403, detail="Silo violation: Access denied")
         
         if not dataset.result_data:
             return {"status": dataset.review_status, "error": dataset.error_message}
