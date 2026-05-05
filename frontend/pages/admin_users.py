@@ -4,6 +4,10 @@ import pandas as pd
 
 API_URL = "http://127.0.0.1:8000"
 
+def get_headers():
+    token = st.session_state.get("token")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
 def show():
     """Renders the User Management dashboard exclusively for admins."""
     st.title("👥 User Management")
@@ -19,7 +23,7 @@ def show():
 
     # Fetch users
     try:
-        res = requests.get(f"{API_URL}/admin/users", params={"admin_username": admin_username}, timeout=10)
+        res = requests.get(f"{API_URL}/admin/users", headers=get_headers(), timeout=10)
         if res.status_code == 200:
             users_data = res.json().get("users", [])
         else:
@@ -75,7 +79,8 @@ def show():
                 try:
                     update_res = requests.put(
                         f"{API_URL}/admin/users/{selected_id}/role",
-                        params={"admin_username": admin_username, "new_role": new_role},
+                        params={"new_role": new_role},
+                        headers=get_headers(),
                         timeout=5
                     )
                     if update_res.status_code == 200:
@@ -93,7 +98,7 @@ def show():
             try:
                 reset_res = requests.post(
                     f"{API_URL}/admin/users/{selected_id}/reset-password",
-                    params={"admin_username": admin_username},
+                    headers=get_headers(),
                     timeout=5
                 )
                 if reset_res.status_code == 200:
@@ -122,7 +127,7 @@ def show():
                         try:
                             del_res = requests.delete(
                                 f"{API_URL}/admin/users/{selected_id}",
-                                params={"admin_username": admin_username},
+                                headers=get_headers(),
                                 timeout=15
                             )
                             if del_res.status_code == 200:

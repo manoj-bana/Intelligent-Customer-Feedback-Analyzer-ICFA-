@@ -211,9 +211,8 @@ def show():
                             st.session_state.username = data["username"]
                             st.session_state.token = data["access_token"]
                             
-                            # Store in query params for browser refresh persistence
-                            st.query_params["token"] = data["access_token"]
-                            st.query_params["username"] = data["username"]
+                            # Remove token from query params to prevent leakage
+                            st.query_params.clear()
                             
                             st.success(f"✅ {ERROR_MESSAGES['REGISTRATION_SUCCESSFUL']}")
                             st.rerun()

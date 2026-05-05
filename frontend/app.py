@@ -12,6 +12,7 @@ if project_root not in sys.path:
 
 from frontend import login, register
 from frontend.pages import dashboard
+from frontend.utils.session import get_session_manager
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -27,18 +28,7 @@ st.markdown(
 
 # --- Session State Initialization ---
 if "logged_in" not in st.session_state:
-    # Check for persistent session in query params to handle browser refresh
-    q_token = st.query_params.get("token")
-    q_username = st.query_params.get("username")
-    q_role = st.query_params.get("role", "user")
-    
-    if q_token and q_username:
-        st.session_state.logged_in = True
-        st.session_state.token = q_token
-        st.session_state.username = q_username
-        st.session_state.role = q_role
-    else:
-        st.session_state.logged_in = False
+    st.session_state.logged_in = False
 
 if "username" not in st.session_state:
     st.session_state.username = ""
@@ -48,6 +38,19 @@ if "token" not in st.session_state:
 
 if "role" not in st.session_state:
     st.session_state.role = "user"
+
+# --- Session Recovery Logic ---
+# This allows persistence across refreshes without putting the token in the URL.
+session_manager = get_session_manager()
+query_sid = st.query_params.get("sid")
+
+if not st.session_state.logged_in and query_sid:
+    if query_sid in session_manager:
+        persisted_session = session_manager[query_sid]
+        st.session_state.logged_in = True
+        st.session_state.username = persisted_session["username"]
+        st.session_state.token = persisted_session["token"]
+        st.session_state.role = persisted_session["role"]
 
 # --- Routing Logic ---
 if not st.session_state.logged_in:

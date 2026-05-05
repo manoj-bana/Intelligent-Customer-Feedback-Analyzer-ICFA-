@@ -163,8 +163,9 @@ def show():
     # Removed dark mode toggle
     
     if st.sidebar.button("🚪 Logout", type="primary", use_container_width=True):
+        from frontend.utils.session import clear_persisted_session
         st.session_state.logged_in = False
-        st.query_params.clear()
+        clear_persisted_session()
         st.rerun()
 
     # Reuse CSS patterns from login/register for consistency
@@ -665,10 +666,10 @@ def show_admin_panel():
     
     # KPI Row for Admin
     try:
-        users_res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, headers=get_headers(), timeout=5)
+        users_res = requests.get(f"{API_URL}/admin/users", headers=get_headers(), timeout=5)
         total_users = len(users_res.json()["users"]) if users_res.status_code == 200 else 0
         
-        req_res = requests.get(f"{API_URL}/auth/admin-requests", params={"admin_username": admin_user}, headers=get_headers(), timeout=5)
+        req_res = requests.get(f"{API_URL}/admin/admin-requests", headers=get_headers(), timeout=5)
         requests_list = req_res.json()["requests"] if req_res.status_code == 200 else []
         pending_reqs = len([r for r in requests_list if r["status"] == "pending"])
         
@@ -695,10 +696,10 @@ def show_admin_panel():
                 with r_col2:
                     if r["status"] == "pending":
                         if st.button("✅ Approve", key=f"app_{r['id']}"):
-                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/approve", params={"admin_username": admin_user}, headers=get_headers())
+                            requests.post(f"{API_URL}/admin/admin-requests/{r['id']}/approve", headers=get_headers())
                             st.rerun()
                         if st.button("❌ Reject", key=f"rej_{r['id']}"):
-                            requests.post(f"{API_URL}/auth/admin-requests/{r['id']}/reject", params={"admin_username": admin_user}, headers=get_headers())
+                            requests.post(f"{API_URL}/admin/admin-requests/{r['id']}/reject", headers=get_headers())
                             st.rerun()
 
 def show_manage_users():
@@ -707,7 +708,7 @@ def show_manage_users():
     
     admin_user = st.session_state.username
     try:
-        res = requests.get(f"{API_URL}/auth/users", params={"admin_username": admin_user}, headers=get_headers(), timeout=10)
+        res = requests.get(f"{API_URL}/admin/users", headers=get_headers(), timeout=10)
         users = res.json()["users"]
         
         # Display as a clean table
@@ -740,7 +741,7 @@ def show_manage_users():
             admin_to_demote = st.selectbox("Select Admin to Demote", [u["username"] for u in admins], key="sel_demote")
             if st.button("🔽 Demote to User", use_container_width=True):
                 target_id = [u["id"] for u in admins if u["username"] == admin_to_demote][0]
-                dem_res = requests.post(f"{API_URL}/auth/users/{target_id}/demote", params={"admin_username": admin_user}, headers=get_headers())
+                dem_res = requests.post(f"{API_URL}/admin/users/{target_id}/demote", headers=get_headers())
                 if dem_res.status_code == 200:
                     st.success(f"Admin privileges revoked for {admin_to_demote}.")
                     st.rerun()
@@ -757,7 +758,7 @@ def show_manage_users():
             user_to_del = st.selectbox("Select User to Deactivate", [u["username"] for u in users if u["username"] != admin_user and u["is_active"] == 1], key="sel_del")
             if st.button("🚨 Deactivate Account", type="primary", use_container_width=True):
                 user_id = [u["id"] for u in users if u["username"] == user_to_del][0]
-                del_res = requests.delete(f"{API_URL}/auth/users/{user_id}", params={"admin_username": admin_user}, headers=get_headers())
+                del_res = requests.delete(f"{API_URL}/admin/users/{user_id}", headers=get_headers())
                 if del_res.status_code == 200:
                     st.success(f"User {user_to_del} deactivated.")
                     st.rerun()
@@ -769,7 +770,7 @@ def show_manage_users():
             user_to_react = st.selectbox("Select User to Restore", [u["username"] for u in users if u["is_active"] == 0], key="sel_react")
             if st.button("✅ Reactivate Account", use_container_width=True):
                 user_id = [u["id"] for u in users if u["username"] == user_to_react][0]
-                react_res = requests.post(f"{API_URL}/auth/users/{user_id}/reactivate", params={"admin_username": admin_user}, headers=get_headers())
+                react_res = requests.post(f"{API_URL}/admin/users/{user_id}/reactivate", headers=get_headers())
                 if react_res.status_code == 200:
                     st.success(f"User {user_to_react} restored.")
                     st.rerun()

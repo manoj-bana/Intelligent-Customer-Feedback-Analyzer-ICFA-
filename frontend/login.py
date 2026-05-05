@@ -92,15 +92,8 @@ def render_login_form():
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    st.session_state.logged_in = True
-                    st.session_state.username = data["username"]
-                    st.session_state.token = data["access_token"]
-                    st.session_state.role = data.get("role", "user")
-                    
-                    # Store in query params for browser refresh persistence
-                    st.query_params["token"] = data["access_token"]
-                    st.query_params["username"] = data["username"]
-                    st.query_params["role"] = data.get("role", "user")
+                    from frontend.utils.session import persist_session
+                    persist_session(data["username"], data["access_token"], data.get("role", "user"))
                     
                     st.success("✅ Login successful!")
                     st.rerun()
